@@ -1,15 +1,21 @@
 // Web Worker para parseo de CSV y algoritmos pesados (Curvatura Mínima, etc.)
 // No tiene dependencias de módulos para poder correr de forma nativa en cualquier navegador.
 
+// DxfParser vive en su propio archivo (compartido con el resto de la app);
+// lo importamos aquí para poder parsear DXF dentro del worker (ver parseDxf()).
+importScripts('dxf-parser.js');
+
 self.onmessage = function(e) {
   const { action, payload } = e.data;
-  
+
   if (action === 'parse_drillholes') {
     parseDrillholes(payload);
   } else if (action === 'parse_blocks') {
     parseBlocks(payload);
   } else if (action === 'parse_samples') {
     parseSamples(payload);
+  } else if (action === 'parse_dxf') {
+    parseDxf(payload);
   } else if (action === 'generate_synthetic') {
     generateSyntheticData(payload);
   }
@@ -1076,6 +1082,149 @@ function parseSamples(payload) {
       attributeMetadata: sampleCols,
       skippedCount
     },
+    warnings,
+    errors
+  }, transferableList);
+}
+
+// ==========================================
+// PROCESAMIENTO DE GEOMETRÍA DXF
+// ==========================================
+// Tamaño de cada trozo de lectura. Cualquier valor "chico" sirve (el archivo
+// nunca se materializa completo en memoria como un solo string); 32MB es un
+// buen equilibrio entre pocas vueltas de lectura y bajo uso de memoria pico.
+const DXF_CHUNK_SIZE = 32 * 1024 * 1024;
+
+/**
+ * Lee un archivo DXF en trozos (chunks) de tamaño fijo y va alimentando cada
+ * línea, a medida que se decodifica, directamente al parser incremental de
+ * DxfParser (feedPair) — nunca se guarda un array con TODAS las líneas del
+ * archivo en memoria.
+ *
+ * Esto reemplaza dos enfoques anteriores, ambos insuficientes para un DXF de
+ * cientos de MB:
+ *   1) FileReader.readAsText(file) completo + text.split('\n'): arma un
+ *      único string con TODO el archivo, lo que puede superar el largo
+ *      máximo de string que soportan los motores JS (V8/Chrome ronda los
+ *      ~500MB-1GB) — la lectura fallaba en silencio (0 capas, sin error).
+ *   2) Leer en trozos pero igual acumular TODAS las líneas ya separadas en
+ *      un array antes de parsear: evita el límite de largo de string, pero
+ *      para un DXF de 650MB con millones de entidades ese array puede tener
+ *      decenas de millones de strings (varios GB en memoria), lo que hacía
+ *      que la pestaña del navegador terminara por falta de memoria (el
+ *      "Out of Memory" reportado).
+ *
+ * Con esta versión, lo único que hay en memoria en un momento dado es: el
+ * trozo de texto actual (~32MB), un puñado de líneas sueltas del trozo, y la
+ * geometría ya decodificada (triangles/lines), que es muchísimo más liviana
+ * que el texto crudo — el uso de memoria ya no depende del tamaño del
+ * archivo, solo de la cantidad de geometría real que contenga.
+ *
+ * Nota menor (igual que en la versión anterior): si un caracter multibyte
+ * (no-ASCII) cae justo en el borde de un trozo, ese caracter puntual puede
+ * decodificarse mal. Con ~20-30 cortes en un archivo de 650MB el riesgo de
+ * que esto caiga justo sobre un dato relevante es despreciable.
+ */
+function readAndParseDxfChunked(file, state, onProgress) {
+  const reader = new FileReaderSync();
+  let leftover = '';
+  // Línea de "código de grupo" pendiente de emparejar con su valor: como los
+  // pares código/valor son siempre 2 líneas, un trozo puede terminar justo
+  // después de una línea de código, dejando el valor para el próximo trozo.
+  let pendingCode = null;
+  let offset = 0;
+  const total = file.size;
+
+  function consumeLine(line) {
+    if (pendingCode === null) {
+      pendingCode = line;
+    } else {
+      state.feedPair(parseInt(pendingCode, 10), line);
+      pendingCode = null;
+    }
+  }
+
+  while (offset < total) {
+    const end = Math.min(offset + DXF_CHUNK_SIZE, total);
+    const blob = file.slice(offset, end);
+    const chunkText = reader.readAsText(blob);
+
+    const combined = leftover + chunkText;
+    const parts = combined.split(/\r?\n/);
+    // La última parte puede estar incompleta (el trozo no terminó justo en
+    // un salto de línea); se guarda para unirla con el próximo trozo.
+    leftover = parts.pop();
+
+    for (let j = 0; j < parts.length; j++) {
+      consumeLine(parts[j].trim());
+    }
+
+    offset = end;
+    if (onProgress) onProgress(offset, total);
+  }
+
+  // Línea final (lo que quedó pendiente tras el último trozo)
+  if (leftover.length > 0) {
+    consumeLine(leftover.trim());
+  }
+  // Si queda un pendingCode sin su valor, el archivo terminó truncado a
+  // mitad de un par — se ignora (no hay forma de completarlo).
+
+  state.finish();
+}
+
+function parseDxf(payload) {
+  const { file } = payload;
+  const warnings = [];
+  const errors = [];
+
+  postMessage({ type: 'progress', percent: 2, message: `Leyendo ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) en trozos...` });
+
+  const state = DxfParser.createStreamParser();
+  try {
+    readAndParseDxfChunked(file, state, (offset, total) => {
+      const pct = Math.floor(2 + (offset / total) * 88); // 2% -> 90%
+      postMessage({ type: 'progress', percent: pct, message: `Leyendo e interpretando DXF: ${(offset / 1024 / 1024).toFixed(0)} MB de ${(total / 1024 / 1024).toFixed(0)} MB...` });
+    });
+  } catch (err) {
+    errors.push({ msg: `Error al leer/parsear el archivo DXF: ${err.message}` });
+    postMessage({ type: 'error', errors, warnings });
+    return;
+  }
+  const rawLayers = state.layers;
+
+  postMessage({ type: 'progress', percent: 92, message: 'Codificando geometría a buffers transferibles...' });
+
+  // Convertir cada capa a Float32Array (las triangles salen de DxfParser como
+  // array plano normal) y juntar todos los ArrayBuffers para transferencia
+  // sin copia (zero-copy) de vuelta al hilo principal.
+  const layers = {};
+  const transferableList = [];
+  let layerCount = 0, triCount = 0, lineCount = 0;
+
+  for (const name in rawLayers) {
+    const l = rawLayers[name];
+    if (l.triangles.length === 0 && l.lines.length === 0) continue;
+
+    const trianglesArr = new Float32Array(l.triangles);
+    transferableList.push(trianglesArr.buffer);
+    l.lines.forEach(lineBuf => transferableList.push(lineBuf.buffer));
+
+    layers[name] = { triangles: trianglesArr, lines: l.lines };
+    layerCount++;
+    triCount += trianglesArr.length / 9; // 3 vértices * 3 coords
+    lineCount += l.lines.length;
+  }
+
+  if (layerCount === 0) {
+    warnings.push({ msg: 'El DXF se leyó completo pero no se encontraron entidades soportadas (3DFACE, LINE, LWPOLYLINE o POLYLINE) dentro de una sección ENTITIES. Verifique que el archivo no dependa de BLOCKS/INSERT (aún no soportado) y que use estas entidades.' });
+  }
+
+  postMessage({ type: 'progress', percent: 100, message: 'DXF procesado.' });
+
+  postMessage({
+    type: 'complete',
+    data: { layers, layerCount, triCount, lineCount },
     warnings,
     errors
   }, transferableList);

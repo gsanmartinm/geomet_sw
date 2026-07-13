@@ -128,18 +128,21 @@ class GeometImporter {
       startRowGroup.classList.add('hidden'); // DXF no necesita filas
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo DXF";
       document.getElementById('csv-file-input').accept = ".dxf";
+      document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo DXF aquí o haz clic para buscar";
     } else if (type === 'samples') {
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
       startRowGroup.classList.remove('hidden');
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV de Muestras Metalúrgicas";
       document.getElementById('csv-file-input').accept = ".csv,.txt";
+      document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo CSV aquí o haz clic para buscar";
     } else { // blocks
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
       startRowGroup.classList.remove('hidden');
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV de Bloques";
       document.getElementById('csv-file-input').accept = ".csv,.txt";
+      document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo CSV aquí o haz clic para buscar";
     }
 
     this.updateModalButtons();
@@ -665,42 +668,18 @@ class GeometImporter {
   // ==========================================
   runDXFImport() {
     const file = this.modalFiles.dxf;
-    app.logConsole('info', `Iniciando parsing de DXF: ${file.name}...`);
+    app.logConsole('info', `Iniciando parsing de DXF: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
     this.closeImportModal();
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      
-      // Ejecutar en microtarea para no bloquear UI principal
-      setTimeout(() => {
-        try {
-          const t0 = performance.now();
-          const layers = DxfParser.parse(text);
-          const t1 = performance.now();
-          
-          let layerCount = 0;
-          let triCount = 0;
-          let lineCount = 0;
-          
-          for (const name in layers) {
-            const l = layers[name];
-            if (l.triangles.length > 0 || l.lines.length > 0) {
-              app.scene.addDxfLayer(name, l);
-              layerCount++;
-              triCount += l.triangles.length / 9; // 3 vertices * 3 coords
-              lineCount += l.lines.length;
-            }
-          }
-          
-          app.logConsole('success', `DXF importado en ${(t1-t0).toFixed(0)}ms. Capas: ${layerCount}, Caras: ${triCount.toLocaleString()}, Polilíneas: ${lineCount.toLocaleString()}`);
-          app.updateLayersTree();
-        } catch (err) {
-          app.logConsole('error', `Error al parsear el DXF: ${err.message}`);
-        }
-      }, 50);
-    };
-    reader.readAsText(file);
+
+    // El parseo se delega al Web Worker (igual que Bloques/Sondajes/Muestras):
+    // para archivos DXF grandes (cientos de MB), leerlos completos en el hilo
+    // principal con FileReader.readAsText podía superar el largo máximo de
+    // string soportado por el motor JS, haciendo que la lectura fallara en
+    // silencio (0 capas, sin ningún error) en vez de lanzar una excepción.
+    // El worker lee el archivo en trozos pequeños (ver parseDxf() en
+    // worker-parser.js), evitando ese límite sin importar el tamaño del DXF,
+    // y además libera al hilo principal/UI durante el parseo.
+    app.runWorkerParser('parse_dxf', { file });
   }
 
   runFinalImport() {

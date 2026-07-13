@@ -356,6 +356,21 @@
               </div>
               <span class="info-label">Puntos de tamaño fijo en pantalla (no se atenúan con el zoom), para distinguirlos fácilmente del modelo de bloques y los sondajes.</span>
             </div>
+
+            <div class="viz-subsection-title">Superficies DXF</div>
+
+            <div class="settings-group">
+              <label for="input-dxf-color">Color de la Superficie</label>
+              <input type="color" id="input-dxf-color" class="form-control" value="#475569">
+            </div>
+
+            <div class="settings-group">
+              <label for="range-dxf-opacity">Transparencia de la Superficie</label>
+              <div class="range-with-value">
+                <input type="range" id="range-dxf-opacity" min="0.05" max="1" step="0.05" value="0.7">
+                <span id="dxf-opacity-val">70%</span>
+              </div>
+            </div>
           </div>
 
           <!-- PESTAÑA FILTROS & SECCIONES -->
@@ -407,6 +422,14 @@
                   <div class="range-with-value">
                     <input type="range" id="range-section-thickness-drillholes" min="1" max="200" step="1" value="10">
                     <span id="section-thickness-drillholes-val">±10 m</span>
+                  </div>
+                </div>
+
+                <div class="settings-group">
+                  <label for="range-section-thickness-dxf">Espesor Ventana — Superficies DXF</label>
+                  <div class="range-with-value">
+                    <input type="range" id="range-section-thickness-dxf" min="1" max="100" step="1" value="5">
+                    <span id="section-thickness-dxf-val">±5 m</span>
                   </div>
                 </div>
               </div>
@@ -515,7 +538,7 @@
               <label for="csv-file-input" id="lbl-file-input">Seleccionar Archivo CSV</label>
               <input type="file" id="csv-file-input" accept=".csv,.txt" class="file-input">
               <div class="file-drop-area" id="file-drop-area">
-                <span class="drop-msg">Arrastra tu archivo CSV aquí o haz clic para buscar</span>
+                <span class="drop-msg" id="drop-msg-text">Arrastra tu archivo CSV aquí o haz clic para buscar</span>
               </div>
             </div>
           </div>
@@ -623,7 +646,9 @@
   <!-- Scripts del Prototipo GeoMet -->
   <script src="js/presets.js"></script>
   <script src="js/octree.js"></script>
-  <script src="js/dxf-parser.js"></script>
+  <!-- dxf-parser.js ya no se carga aquí: el parseo de DXF corre dentro del
+       Web Worker (worker-parser.js lo importa vía importScripts), no en el
+       hilo principal — ver runDXFImport() en importer.js. -->
   <script src="js/scene.js"></script>
   <script src="js/importer.js"></script>
   <script src="js/app.js"></script>

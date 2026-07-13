@@ -182,6 +182,29 @@ class GeometApp {
       });
     }
 
+    // Superficies DXF: color y transparencia. A diferencia de Bloques/
+    // Sondajes/Muestras (que se re-generan desde los datos crudos en cada
+    // cambio vía trigger*Refresh), las capas DXF ya son mallas de Three.js
+    // armadas una sola vez al importar — así que en vez de reconstruirlas,
+    // updateDxfStyle() solo actualiza el material existente in-place.
+    const inputDxfColor = document.getElementById('input-dxf-color');
+    if (inputDxfColor) {
+      inputDxfColor.addEventListener('input', (e) => {
+        this.scene.dxfColor = parseInt(e.target.value.replace('#', '0x'), 16);
+        this.scene.updateDxfStyle();
+      });
+    }
+
+    const rangeDxfOpacity = document.getElementById('range-dxf-opacity');
+    if (rangeDxfOpacity) {
+      rangeDxfOpacity.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById('dxf-opacity-val').innerText = `${Math.round(val * 100)}%`;
+        this.scene.dxfOpacity = val;
+        this.scene.updateDxfStyle();
+      });
+    }
+
     // Sección de Corte (Sliders & Checkbox)
     const chkSection = document.getElementById('chk-section-active');
     const sectionControls = document.getElementById('section-controls-container');
@@ -194,6 +217,7 @@ class GeometApp {
       this.triggerBlockRefresh();
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
+      this.scene.updateDxfSectionClip();
     });
 
     document.getElementById('select-section-type').addEventListener('change', (e) => {
@@ -201,6 +225,7 @@ class GeometApp {
       this.triggerBlockRefresh();
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
+      this.scene.updateDxfSectionClip();
     });
 
     // Posición de corte: slider + input numérico sincronizados entre sí,
@@ -213,6 +238,7 @@ class GeometApp {
       this.triggerBlockRefresh();
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
+      this.scene.updateDxfSectionClip();
     });
 
     if (inputSecPos) {
@@ -229,6 +255,7 @@ class GeometApp {
         this.triggerBlockRefresh();
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
+        this.scene.updateDxfSectionClip();
       };
       inputSecPos.addEventListener('change', commitInputSecPos);
       inputSecPos.addEventListener('keydown', (e) => {
@@ -257,6 +284,19 @@ class GeometApp {
       });
     }
 
+    // Espesor de ventana propio para Superficies DXF: a diferencia de
+    // Bloques/Sondajes (nubes de puntos/instancias que se filtran por índice),
+    // las superficies DXF son mallas continuas y se recortan en vivo con
+    // clipping planes (scene.updateDxfSectionClip()) — ver esa función para el
+    // porqué de un espesor angosto que muestra el "borde" de nivel/sección.
+    const rangeSecThickDxf = document.getElementById('range-section-thickness-dxf');
+    if (rangeSecThickDxf) {
+      rangeSecThickDxf.addEventListener('input', (e) => {
+        document.getElementById('section-thickness-dxf-val').innerText = `±${e.target.value} m`;
+        this.scene.updateDxfSectionClip();
+      });
+    }
+
     // Botones de avanzar/retroceder secciones (usan el espesor de Bloques como paso)
     const btnSecPrev = document.getElementById('btn-sec-prev');
     const btnSecNext = document.getElementById('btn-sec-next');
@@ -269,6 +309,7 @@ class GeometApp {
         this.triggerBlockRefresh();
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
+        this.scene.updateDxfSectionClip();
       });
       btnSecNext.addEventListener('click', () => {
         const thickness = parseFloat(rangeSecThickBlocks && rangeSecThickBlocks.value) || 10;
@@ -278,6 +319,7 @@ class GeometApp {
         this.triggerBlockRefresh();
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
+        this.scene.updateDxfSectionClip();
       });
     }
 
@@ -492,6 +534,8 @@ class GeometApp {
           this.loadDrillholeData(msg.data, msg.warnings);
         } else if (action === 'parse_samples') {
           this.loadSamplesData(msg.data, msg.warnings);
+        } else if (action === 'parse_dxf') {
+          this.loadDxfData(msg.data, msg.warnings);
         } else {
           this.loadBlockData(msg.data, msg.warnings);
         }
@@ -779,6 +823,31 @@ class GeometApp {
     }
 
     this.triggerSamplesRefresh();
+    this.updateLayersTree();
+  }
+
+  /**
+   * Recibe el resultado del parseo de DXF hecho en el Web Worker (ver
+   * parseDxf() en worker-parser.js) y agrega cada capa a la escena 3D. La
+   * geometría ya viene lista (Float32Array) — aquí solo se recorren las
+   * capas y se delega el render a scene.addDxfLayer(), igual que antes
+   * cuando el parseo se hacía en el hilo principal.
+   */
+  loadDxfData(data, warnings) {
+    if (warnings) {
+      warnings.forEach(w => this.logConsole('warn', w.msg, w.file, w.line));
+    }
+
+    for (const name in data.layers) {
+      this.scene.addDxfLayer(name, data.layers[name]);
+    }
+
+    if (data.layerCount > 0) {
+      this.logConsole('success', `DXF importado. Capas: ${data.layerCount}, Caras: ${data.triCount.toLocaleString()}, Polilíneas: ${data.lineCount.toLocaleString()}`);
+    } else {
+      this.logConsole('warn', 'DXF leído pero no se importó ninguna capa (ver advertencia anterior con el detalle).');
+    }
+
     this.updateLayersTree();
   }
 

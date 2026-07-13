@@ -682,6 +682,15 @@ body {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 5px rgba(0, 255, 255, 0.2);
 }
+/* input[type=color] nativo ignora el padding normal de .form-control (el
+   navegador reserva esa área para su propio swatch), dejando un marco vacío
+   raro alrededor del color. Se le quita el padding y se le fija una altura
+   pareja al resto de los controles, para que el swatch ocupe todo el ancho. */
+input[type="color"].form-control {
+  padding: 3px;
+  height: 34px;
+  cursor: pointer;
+}
 .info-label {
   display: block;
   font-size: 0.65rem;

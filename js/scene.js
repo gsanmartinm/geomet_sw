@@ -31,6 +31,11 @@ class GeometScene {
     });
     this.renderer.setSize(this.width, this.height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Habilita el soporte de "local clipping planes" (por-material) de Three.js.
+    // Se usa para recortar las superficies DXF a la vista de sección/planta
+    // activa — ver updateDxfSectionClip(). Sin esto, asignar
+    // material.clippingPlanes no tiene ningún efecto visual.
+    this.renderer.localClippingEnabled = true;
     
     // Orbit Controls
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
@@ -135,7 +140,10 @@ class GeometScene {
     this.blockOpacity = 1.0;
     this.drillholeThickness = 5.0;
     this.samplePointSize = 6.0;  // px (tamaño fijo en pantalla, no se atenúa con la distancia)
-    
+    this.dxfColor = 0x475569;    // Gris azulado mineral (color por defecto de las superficies DXF)
+    this.dxfOpacity = 0.7;
+    this._dxfClipPlanes = [];    // clipping planes activos (ver updateDxfSectionClip)
+
     // Raycasting & Tooltips
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
@@ -1465,12 +1473,16 @@ class GeometScene {
       geom.setAttribute('position', new THREE.Float32BufferAttribute(dxfData.triangles, 3));
       geom.computeVertexNormals();
       
-      // Material de topografía semi-translúcido con iluminación
+      // Material de topografía semi-translúcido con iluminación. Color y
+      // opacidad salen de this.dxfColor/this.dxfOpacity (editables desde el
+      // panel Visualización > Superficies DXF) en vez de quedar fijos, para
+      // que updateDxfStyle() pueda ajustarlos en vivo sin reconstruir la
+      // geometría.
       const meshMat = new THREE.MeshLambertMaterial({
-        color: 0x475569, // Gris azulado mineral
+        color: this.dxfColor,
         side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.7,
+        transparent: this.dxfOpacity < 1,
+        opacity: this.dxfOpacity,
         wireframe: false
       });
       
@@ -1503,9 +1515,17 @@ class GeometScene {
       });
     }
     
+    // Aplicar el recorte de sección/planta actualmente activo (si lo hay) a
+    // esta capa recién creada, para que quede consistente con capas ya
+    // cargadas si el usuario importa un nuevo DXF mientras una sección ya
+    // está activa (ver updateDxfSectionClip()).
+    layerGroup.children.forEach(child => {
+      if (child.material) child.material.clippingPlanes = this._dxfClipPlanes;
+    });
+
     this.dxfGroup.add(layerGroup);
     this.dxfMeshes[layerName] = layerGroup;
-    
+
     // Focar cámara si es la primera capa
     if (Object.keys(this.dxfMeshes).length === 1 && dxfData.triangles && dxfData.triangles.length > 0) {
       // Calcular límites rápidos
@@ -1519,6 +1539,88 @@ class GeometScene {
         if (z<minZ) minZ=z; if (z>maxZ) maxZ=z;
       }
       this.focusOnBounds({ minX, maxX, minY, maxY, minZ, maxZ });
+    }
+  }
+
+  /**
+   * Aplica this.dxfColor/this.dxfOpacity a todas las superficies DXF ya
+   * cargadas, en vivo. A diferencia de Bloques/Sondajes/Muestras, las capas
+   * DXF no se reconstruyen desde datos crudos en cada cambio de estilo: solo
+   * se actualiza el material del mesh de caras ya existente (mucho más
+   * rápido, y funciona sin importar cuántas superficies/triángulos haya
+   * cargados). El wireframe de contorno y las polilíneas/contornos DXF
+   * (LINE/LWPOLYLINE, en cian) mantienen su propio color fijo — el control
+   * de color solo afecta el relleno de la superficie.
+   */
+  updateDxfStyle() {
+    const colorObj = new THREE.Color(this.dxfColor);
+    for (const layerName in this.dxfMeshes) {
+      const layerGroup = this.dxfMeshes[layerName];
+      layerGroup.children.forEach(child => {
+        if (child.isMesh && child.material) {
+          child.material.color.copy(colorObj);
+          child.material.opacity = this.dxfOpacity;
+          child.material.transparent = this.dxfOpacity < 1;
+          child.material.needsUpdate = true;
+        }
+      });
+    }
+  }
+
+  /**
+   * Recorta (clip) las superficies DXF a la misma vista de Sección/Planta
+   * activa para Bloques/Sondajes/Muestras (panel Filtros & Secciones), usando
+   * los "clipping planes" nativos de Three.js en vez de filtrar índices o
+   * reconstruir geometría: al estar en Planta, por ejemplo, solo debe verse
+   * la porción de la superficie cuya cota Z cae dentro del espesor de ventana
+   * configurado para DXF — lo que en la práctica dibuja el "borde"/curva de
+   * nivel donde la superficie cruza esa franja, tal como se ve un corte real
+   * de topografía. Mismo mapeo de eje que el resto de las capas:
+   * 'horizontal' (Planta) -> Z, 'vertical-n' (Sección N-S) -> X,
+   * 'vertical-e' (Sección E-O) -> Y.
+   *
+   * Se llama cada vez que cambia algo del corte (activo/inactivo, tipo,
+   * posición o espesor DXF) y también aplica el resultado a cualquier capa
+   * DXF que se cargue después (ver el bloque en addDxfLayer() que lee
+   * this._dxfClipPlanes).
+   */
+  updateDxfSectionClip() {
+    const chkSection = document.getElementById('chk-section-active');
+    const sectionActive = !!(chkSection && chkSection.checked);
+
+    let planes = [];
+    if (sectionActive) {
+      const type = document.getElementById('select-section-type').value;
+      const coord = parseFloat(document.getElementById('range-section-pos').value);
+      const thicknessEl = document.getElementById('range-section-thickness-dxf');
+      const thickness = thicknessEl ? parseFloat(thicknessEl.value) : 5;
+
+      if (!isNaN(coord) && !isNaN(thickness)) {
+        let axisNormal;
+        if (type === 'vertical-n') axisNormal = new THREE.Vector3(1, 0, 0);       // Eje X
+        else if (type === 'vertical-e') axisNormal = new THREE.Vector3(0, 1, 0);  // Eje Y
+        else axisNormal = new THREE.Vector3(0, 0, 1);                            // Eje Z (Planta)
+
+        // Dos planos formando una "rebanada" (slab): normal apuntando hacia
+        // valores crecientes mantiene coord >= min; su inverso mantiene
+        // coord <= max. Por defecto Three.js clippea la UNIÓN de las zonas
+        // negativas de todos los planos (clipIntersection=false), o sea que
+        // un punto sobrevive solo si está del lado positivo de AMBOS planos —
+        // exactamente la intersección [min, max] que se busca.
+        const planeMin = new THREE.Plane(axisNormal.clone(), -(coord - thickness));
+        const planeMax = new THREE.Plane(axisNormal.clone().negate(), (coord + thickness));
+        planes = [planeMin, planeMax];
+      }
+    }
+
+    this._dxfClipPlanes = planes;
+    for (const layerName in this.dxfMeshes) {
+      this.dxfMeshes[layerName].children.forEach(child => {
+        if (child.material) {
+          child.material.clippingPlanes = planes;
+          child.material.needsUpdate = true;
+        }
+      });
     }
   }
 
