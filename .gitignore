@@ -1,0 +1,10 @@
+# Datos de clientes/proyectos (assays, modelos de bloques, sondajes) —
+# nunca deben subirse a un repositorio público. Se mantienen solo en el
+# Shared Drive local; el PoC funciona igual, cada usuario carga sus propios
+# datos vía el importador dentro de la app.
+data/
+
+# Basura de sistema operativo
+Thumbs.db
+.DS_Store
+desktop.ini

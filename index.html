@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoMet V1 — Software de Geometalurgia</title>
+  <meta name="description" content="GeoMet V1: Visualización 3D e importación de datos para geometalurgia.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+  
+  <!-- Three.js y OrbitControls CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body class="dark-mode">
+  <!-- Layout Principal -->
+  <div id="app-container">
+    
+    <!-- HEADER -->
+    <header id="main-header">
+      <div class="logo">
+        <span class="highlight">GEO</span><span>MET</span>
+        <span class="version-tag">V1 PoC</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-generate-synthetic" class="btn btn-outline" title="Genera un dataset masivo para pruebas de rendimiento de 1M-5M bloques">Generar Datos Sintéticos</button>
+        <div id="connection-status" class="status-indicator online">Listo</div>
+      </div>
+    </header>
+
+    <!-- CUERPO PRINCIPAL (Layout de Paneles) -->
+    <main id="main-layout">
+      
+      <!-- PANEL IZQUIERDO: IMPORTADOR Y CAPAS -->
+      <aside id="left-sidebar" class="sidebar">
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="tab-import">Importar</button>
+          <button class="tab-btn" data-tab="tab-layers">Capas (<span id="layer-count">0</span>)</button>
+        </div>
+
+        <div class="sidebar-content">
+          <!-- PESTAÑA IMPORTAR -->
+          <div id="tab-import" class="tab-panel active">
+            <div class="section-title">Importador de Datos</div>
+            <div class="import-cards">
+              <!-- Modelo de Bloques -->
+              <div class="import-card" id="card-blocks">
+                <div class="card-header">
+                  <h4>Modelo de Bloques</h4>
+                  <span class="badge badge-empty" id="status-blocks">Vacío</span>
+                </div>
+                <p class="card-desc">Centroides en CSV con leyes y atributos (Soporta >5M bloques).</p>
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-primary" onclick="app.importer.openImportModal('blocks')">Cargar Bloques...</button>
+                </div>
+              </div>
+
+              <!-- Collar / Sondajes -->
+              <div class="import-card" id="card-drillholes">
+                <div class="card-header">
+                  <h4>Sondajes</h4>
+                  <span class="badge badge-empty" id="status-drillholes">Vacío</span>
+                </div>
+                <p class="card-desc">Soporta Collar, Survey, Assays y Geología (CSV).</p>
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-primary" onclick="app.importer.openImportModal('drillholes')">Cargar Sondajes...</button>
+                </div>
+              </div>
+
+              <!-- Muestras Metalúrgicas -->
+              <div class="import-card" id="card-samples">
+                <div class="card-header">
+                  <h4>Muestras Metalúrgicas</h4>
+                  <span class="badge badge-empty" id="status-samples">Vacío</span>
+                </div>
+                <p class="card-desc">Posiciona por HoleID+Desde/Hasta (interpolado sobre sondajes ya cargados) o por Centroide X/Y/Z directo.</p>
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-primary" onclick="app.importer.openImportModal('samples')">Cargar Muestras...</button>
+                </div>
+              </div>
+
+              <!-- Topografía / DXF -->
+              <div class="import-card" id="card-dxf">
+                <div class="card-header">
+                  <h4>Superficies DXF</h4>
+                  <span class="badge badge-empty" id="status-dxf">Vacío</span>
+                </div>
+                <p class="card-desc">Carga topografías (TIN), mallas y polígonos de dominio.</p>
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-primary" onclick="app.importer.openImportModal('dxf')">Cargar DXF...</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel de Información del Proyecto -->
+            <div class="project-info-panel">
+              <h5>Resumen del Proyecto</h5>
+              <ul class="stats-list">
+                <li><span>Sondajes:</span> <strong id="stat-holes-count">0</strong></li>
+                <li><span>Intervalos:</span> <strong id="stat-intervals-count">0</strong></li>
+                <li><span>Bloques:</span> <strong id="stat-blocks-count">0</strong></li>
+                <li><span>Muestras:</span> <strong id="stat-samples-count">0</strong></li>
+                <li><span>Límites X:</span> <strong id="stat-lim-x">-</strong></li>
+                <li><span>Límites Y:</span> <strong id="stat-lim-y">-</strong></li>
+                <li><span>Límites Z:</span> <strong id="stat-lim-z">-</strong></li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- PESTAÑA CAPAS -->
+          <div id="tab-layers" class="tab-panel">
+            <div class="section-title">Estructura de Capas</div>
+            <div id="layers-tree" class="tree-view">
+              <div class="empty-notice">No hay capas cargadas. Importe datos para comenzar.</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- VISOR 3D (CENTRO) -->
+      <section id="viewport-container">
+        <canvas id="three-canvas"></canvas>
+
+        <!-- Regla de ejes con valores de referencia (solo visible en vistas de
+             Planta / Perfil N / Perfil E exactas): líneas sutiles verdes en el
+             visor 3D (ver scene.js) + etiquetas numéricas abajo/izquierda -->
+        <div id="axis-ruler-container" class="axis-ruler-container"></div>
+
+        <!-- Controles flotantes sobre el visor -->
+        <div id="viewport-overlay">
+          <div class="overlay-card fps-counter">
+            <span>FPS:</span> <strong id="fps-val">60</strong>
+          </div>
+          <div class="overlay-card navigation-helper">
+            <button onclick="app.scene.resetCamera()" title="Restablecer Vista (Home)" class="btn-view-home">⌂</button>
+            <button onclick="app.scene.setView('top')" title="Vista Planta (mirando hacia abajo)" class="btn-view">Planta</button>
+            <button onclick="app.scene.setView('front')" title="Vista Perfil Norte-Sur" class="btn-view">Perfil N</button>
+            <button onclick="app.scene.setView('side')" title="Vista Perfil Este-Oeste" class="btn-view">Perfil E</button>
+          </div>
+
+          <!-- Brújula de orientación -->
+          <div id="compass-widget" class="overlay-card compass-card">
+            <div class="compass-ring">
+              <span class="compass-label north">N</span>
+              <span class="compass-label east">E</span>
+              <span class="compass-label south">S</span>
+              <span class="compass-label west">O</span>
+              <div class="compass-needle" id="compass-needle">
+                <div class="needle-north"></div>
+                <div class="needle-south"></div>
+              </div>
+            </div>
+            <div class="compass-view-label" id="compass-view-label">Vista 3D</div>
+          </div>
+          
+          <!-- Leyendas Dinámicas (independientes por capa, arrastrables con el mouse) -->
+          <div id="legend-blocks" class="overlay-card legend-card legend-card-blocks hidden">
+            <div class="legend-header" title="Arrastra para mover">
+              <span id="legend-attribute-name-blocks">Ley de Cu</span>
+              <button onclick="app.scene.toggleLegend('blocks')" class="btn-icon">×</button>
+            </div>
+            <div class="legend-subtitle">Modelo de Bloques</div>
+            <div id="legend-colors-container-blocks">
+              <!-- Se llena dinámicamente -->
+            </div>
+          </div>
+
+          <div id="legend-drillholes" class="overlay-card legend-card legend-card-drillholes hidden">
+            <div class="legend-header" title="Arrastra para mover">
+              <span id="legend-attribute-name-drillholes">Ley de Cu</span>
+              <button onclick="app.scene.toggleLegend('drillholes')" class="btn-icon">×</button>
+            </div>
+            <div class="legend-subtitle">Sondajes</div>
+            <div id="legend-colors-container-drillholes">
+              <!-- Se llena dinámicamente -->
+            </div>
+          </div>
+
+          <div id="legend-samples" class="overlay-card legend-card legend-card-samples hidden">
+            <div class="legend-header" title="Arrastra para mover">
+              <span id="legend-attribute-name-samples">Ley de Fe</span>
+              <button onclick="app.scene.toggleLegend('samples')" class="btn-icon">×</button>
+            </div>
+            <div class="legend-subtitle">Muestras Metalúrgicas</div>
+            <div id="legend-colors-container-samples">
+              <!-- Se llena dinámicamente -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tooltip flotante para Hover de datos -->
+        <div id="three-tooltip" class="custom-tooltip hidden"></div>
+      </section>
+
+      <!-- PANEL DERECHO: VISUALIZACIÓN Y FILTROS -->
+      <aside id="right-sidebar" class="sidebar">
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="tab-viz">Visualización</button>
+          <button class="tab-btn" data-tab="tab-filters">Filtros & Secciones</button>
+        </div>
+
+        <div class="sidebar-content">
+          <!-- PESTAÑA VISUALIZACIÓN -->
+          <div id="tab-viz" class="tab-panel active">
+            <div class="settings-group">
+              <label for="select-render-mode">Modo de Render de Bloques</label>
+              <select id="select-render-mode" class="form-control">
+                <option value="points">Puntos (Ultra Rápido, 5M+)</option>
+                <option value="cubes">Cajas Sólidas (Instanciado, <500k)</option>
+              </select>
+              <span class="info-label">Nota: El modo "Cajas" se limita a 500k bloques visibles por rendimiento.</span>
+            </div>
+
+            <div class="viz-subsection-title no-border-top">Modelo de Bloques</div>
+
+            <div class="settings-group">
+              <label for="select-color-attribute-blocks">Atributo Activo (Coloreado)</label>
+              <select id="select-color-attribute-blocks" class="form-control">
+                <option value="">(Ninguno)</option>
+              </select>
+            </div>
+
+            <div class="settings-group" id="group-color-scheme-blocks">
+              <label>Esquema de Colores</label>
+              <div class="palette-picker" data-viz-target="blocks">
+                <button class="palette-btn active" data-palette="rainbow" style="background: linear-gradient(to right, blue, green, yellow, red);"></button>
+                <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
+                <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
+                <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+              </div>
+            </div>
+
+            <!-- Rango de Color Manual (solo visible para atributos numéricos) -->
+            <div class="settings-group hidden" id="group-color-range-blocks">
+              <label>Rango de Coloreado</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="number" id="input-color-min-blocks" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="number" id="input-color-max-blocks" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <button id="btn-color-range-auto-blocks" class="btn btn-xs btn-outline" title="Restablecer al rango automático de los datos">Auto</button>
+              </div>
+              <div class="color-range-preview" id="color-range-preview-bar-blocks"></div>
+              <span class="info-label" id="color-range-info-blocks">Rango detectado automáticamente</span>
+            </div>
+
+            <div class="settings-group">
+              <label for="range-block-size">Tamaño Visual del Bloque</label>
+              <div class="range-with-value">
+                <input type="range" id="range-block-size" min="0.1" max="2" step="0.1" value="1.0">
+                <span id="block-size-val">1.0</span>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <label for="range-block-opacity">Transparencia del Bloque</label>
+              <div class="range-with-value">
+                <input type="range" id="range-block-opacity" min="0.05" max="1" step="0.05" value="1.0">
+                <span id="block-opacity-val">100%</span>
+              </div>
+            </div>
+
+            <div class="viz-subsection-title">Sondajes</div>
+
+            <div class="settings-group">
+              <label for="select-color-attribute-drillholes">Atributo Activo (Coloreado)</label>
+              <select id="select-color-attribute-drillholes" class="form-control">
+                <option value="">(Ninguno)</option>
+              </select>
+            </div>
+
+            <div class="settings-group" id="group-color-scheme-drillholes">
+              <label>Esquema de Colores</label>
+              <div class="palette-picker" data-viz-target="drillholes">
+                <button class="palette-btn active" data-palette="rainbow" style="background: linear-gradient(to right, blue, green, yellow, red);"></button>
+                <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
+                <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
+                <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+              </div>
+            </div>
+
+            <!-- Rango de Color Manual (solo visible para atributos numéricos) -->
+            <div class="settings-group hidden" id="group-color-range-drillholes">
+              <label>Rango de Coloreado</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="number" id="input-color-min-drillholes" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="number" id="input-color-max-drillholes" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <button id="btn-color-range-auto-drillholes" class="btn btn-xs btn-outline" title="Restablecer al rango automático de los datos">Auto</button>
+              </div>
+              <div class="color-range-preview" id="color-range-preview-bar-drillholes"></div>
+              <span class="info-label" id="color-range-info-drillholes">Rango detectado automáticamente</span>
+            </div>
+
+            <div class="settings-group">
+              <label for="range-drillhole-size">Grosor de Sondajes</label>
+              <div class="range-with-value">
+                <input type="range" id="range-drillhole-size" min="1" max="20" step="1" value="5">
+                <span id="drillhole-size-val">5px</span>
+              </div>
+            </div>
+
+            <div class="viz-subsection-title">Muestras Metalúrgicas</div>
+
+            <div class="settings-group">
+              <label for="select-color-attribute-samples">Atributo Activo (Coloreado)</label>
+              <select id="select-color-attribute-samples" class="form-control">
+                <option value="">(Ninguno)</option>
+              </select>
+            </div>
+
+            <div class="settings-group" id="group-color-scheme-samples">
+              <label>Esquema de Colores</label>
+              <div class="palette-picker" data-viz-target="samples">
+                <button class="palette-btn active" data-palette="rainbow" style="background: linear-gradient(to right, blue, green, yellow, red);"></button>
+                <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
+                <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
+                <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+              </div>
+            </div>
+
+            <!-- Rango de Color Manual (solo visible para atributos numéricos) -->
+            <div class="settings-group hidden" id="group-color-range-samples">
+              <label>Rango de Coloreado</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="number" id="input-color-min-samples" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="number" id="input-color-max-samples" class="form-control-sm color-range-input" step="any" placeholder="Auto">
+                </div>
+                <button id="btn-color-range-auto-samples" class="btn btn-xs btn-outline" title="Restablecer al rango automático de los datos">Auto</button>
+              </div>
+              <div class="color-range-preview" id="color-range-preview-bar-samples"></div>
+              <span class="info-label" id="color-range-info-samples">Rango detectado automáticamente</span>
+            </div>
+
+            <div class="settings-group">
+              <label for="range-sample-size">Tamaño de Punto (Muestras)</label>
+              <div class="range-with-value">
+                <input type="range" id="range-sample-size" min="1" max="20" step="1" value="6">
+                <span id="sample-size-val">6px</span>
+              </div>
+              <span class="info-label">Puntos de tamaño fijo en pantalla (no se atenúan con el zoom), para distinguirlos fácilmente del modelo de bloques y los sondajes.</span>
+            </div>
+          </div>
+
+          <!-- PESTAÑA FILTROS & SECCIONES -->
+          <div id="tab-filters" class="tab-panel">
+            <!-- Sección de Corte (Slicing) -->
+            <div class="filter-section">
+              <div class="filter-section-title">
+                <span>Vistas de Sección / Planta</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-section-active">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              
+              <div id="section-controls-container" class="disabled-overlay">
+                <div class="settings-group">
+                  <label for="select-section-type">Orientación del Corte</label>
+                  <select id="select-section-type" class="form-control">
+                    <option value="horizontal">Planta (Horizontal, Eje Z)</option>
+                    <option value="vertical-n">Sección N-S (Eje X)</option>
+                    <option value="vertical-e">Sección E-O (Eje Y)</option>
+                  </select>
+                </div>
+
+                <div class="settings-group">
+                  <label for="range-section-pos" id="label-section-pos">Posición de Corte (Cota Z)</label>
+                  <div class="range-with-value" style="gap: 6px;">
+                    <button id="btn-sec-prev" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Retroceder Sección">-</button>
+                    <input type="range" id="range-section-pos" min="-1000" max="1000" step="1" value="0" style="flex: 1;">
+                    <button id="btn-sec-next" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Avanzar Sección">+</button>
+                    <span id="section-pos-val" style="width: 55px; text-align: right;">0 m</span>
+                  </div>
+                  <div class="range-with-value" style="gap: 6px; margin-top: 6px;">
+                    <input type="number" id="input-section-pos" class="form-control-sm" step="any" style="flex: 1;" placeholder="Valor exacto...">
+                    <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (valor exacto)</span>
+                  </div>
+                </div>
+
+                <div class="settings-group">
+                  <label for="range-section-thickness-blocks">Espesor Ventana — Modelo de Bloques</label>
+                  <div class="range-with-value">
+                    <input type="range" id="range-section-thickness-blocks" min="1" max="100" step="1" value="5">
+                    <span id="section-thickness-blocks-val">±5 m</span>
+                  </div>
+                </div>
+
+                <div class="settings-group">
+                  <label for="range-section-thickness-drillholes">Espesor Ventana — Sondajes / Muestras</label>
+                  <div class="range-with-value">
+                    <input type="range" id="range-section-thickness-drillholes" min="1" max="200" step="1" value="10">
+                    <span id="section-thickness-drillholes-val">±10 m</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Grilla de Referencia (líneas + valores en vistas de Planta/Perfil) -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Grilla de Referencia (Planta / Perfil)</span>
+              </div>
+              <div class="settings-group">
+                <label for="input-axis-grid-step">Espaciado de Grilla (metros)</label>
+                <div class="range-with-value" style="gap: 6px;">
+                  <input type="number" id="input-axis-grid-step" class="form-control-sm" step="any" min="0" style="flex: 1;" placeholder="Automático">
+                  <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m entre líneas</span>
+                </div>
+                <span class="info-label">Deja vacío o en 0 para calcular automáticamente un paso "redondo".</span>
+              </div>
+              <div class="settings-group">
+                <label for="range-axis-grid-opacity">Transparencia de la Grilla</label>
+                <div class="range-with-value">
+                  <input type="range" id="range-axis-grid-opacity" min="0.05" max="1" step="0.05" value="0.45">
+                  <span id="axis-grid-opacity-val">45%</span>
+                </div>
+              </div>
+              <div class="settings-group">
+                <label for="range-axis-grid-label-size">Tamaño de los Números</label>
+                <div class="range-with-value">
+                  <input type="range" id="range-axis-grid-label-size" min="0.5" max="1.4" step="0.05" value="0.68">
+                  <span id="axis-grid-label-size-val">0.68rem</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Filtros de Atributo — Modelo de Bloques -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Filtros — Modelo de Bloques</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-filter-blocks">+ Añadir Filtro</button>
+              </div>
+              <div id="filter-builder-blocks" class="filter-builder hidden"></div>
+              <div id="active-filters-list-blocks" class="filters-container">
+                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+              </div>
+            </div>
+
+            <!-- Filtros de Atributo — Sondajes -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Filtros — Sondajes</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-filter-drillholes">+ Añadir Filtro</button>
+              </div>
+              <div id="filter-builder-drillholes" class="filter-builder hidden"></div>
+              <div id="active-filters-list-drillholes" class="filters-container">
+                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+              </div>
+            </div>
+
+            <!-- Filtros de Atributo — Muestras Metalúrgicas -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Filtros — Muestras</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-filter-samples">+ Añadir Filtro</button>
+              </div>
+              <div id="filter-builder-samples" class="filter-builder hidden"></div>
+              <div id="active-filters-list-samples" class="filters-container">
+                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- CONSOLA DE VALIDACIONES (BOTTOM) -->
+    <footer id="validation-console">
+      <div class="console-header">
+        <div class="console-title">
+          <span>Consola de Importación y Calidad de Datos</span>
+          <span class="counter-badge badge-warning" id="console-warn-count">0</span>
+          <span class="counter-badge badge-danger" id="console-err-count">0</span>
+        </div>
+        <div class="console-actions">
+          <button onclick="app.clearConsole()" class="btn btn-xs btn-outline">Limpiar</button>
+          <button class="btn btn-xs btn-outline" id="btn-toggle-console">Minimizar</button>
+        </div>
+      </div>
+      <div class="console-body" id="console-messages">
+        <div class="console-msg info">[Sistema] Consola iniciada. GeoMet V1 listo para importar archivos.</div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- MODAL DE IMPORTACIÓN CONFIGURABLE -->
+  <div id="import-modal" class="modal-overlay hidden">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h3 id="modal-title">Configurar Importador</h3>
+        <button onclick="app.importer.closeImportModal()" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Paso 1: Selección de archivos -->
+        <div class="modal-step" id="step-file-selection">
+          <div class="form-row">
+            <div class="form-group col-12">
+              <label for="csv-file-input" id="lbl-file-input">Seleccionar Archivo CSV</label>
+              <input type="file" id="csv-file-input" accept=".csv,.txt" class="file-input">
+              <div class="file-drop-area" id="file-drop-area">
+                <span class="drop-msg">Arrastra tu archivo CSV aquí o haz clic para buscar</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Solo para Sondajes: múltiples archivos -->
+          <div id="drillholes-multi-files" class="hidden">
+            <div class="multi-file-row">
+              <label>CSV de Collares (Collar):</label>
+              <input type="file" id="csv-collar" accept=".csv,.txt">
+            </div>
+            <div class="multi-file-row mt-2">
+              <label>CSV de Trayectoria (Survey):</label>
+              <input type="file" id="csv-survey" accept=".csv,.txt">
+            </div>
+            <div class="multi-file-row mt-2">
+              <label>CSV de Ensayos (Assays):</label>
+              <input type="file" id="csv-assays" accept=".csv,.txt">
+            </div>
+            <div class="multi-file-row mt-2">
+              <label>CSV de Geología (Geology - Opcional):</label>
+              <input type="file" id="csv-geology" accept=".csv,.txt">
+            </div>
+          </div>
+
+          <!-- Opciones de formato de archivo -->
+          <div class="form-row mt-3">
+            <div class="form-group col-4">
+              <label for="import-start-row">Fila inicial de datos</label>
+              <input type="number" id="import-start-row" value="2" min="1" class="form-control">
+            </div>
+            <div class="form-group col-8">
+              <label for="select-header-source">Ubicación de Encabezados</label>
+              <select id="select-header-source" class="form-control">
+                <option value="first-row">Primera fila del archivo (Fila 1)</option>
+                <option value="custom-row">En otra fila del archivo...</option>
+                <option value="separate-file">En un archivo CSV separado...</option>
+                <option value="none">Sin encabezados (Usar columnas por índice)</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-row hidden" id="row-custom-header">
+            <div class="form-group col-12">
+              <label for="import-header-row">Fila exacta de encabezados</label>
+              <input type="number" id="import-header-row" value="1" min="1" class="form-control">
+            </div>
+          </div>
+
+          <div class="form-row hidden" id="row-separate-header-file">
+            <div class="form-group col-12">
+              <label for="header-file-input">Archivo CSV de Encabezados</label>
+              <input type="file" id="header-file-input" accept=".csv" class="form-control">
+            </div>
+          </div>
+        </div>
+
+        <!-- Paso 2: Vista previa y mapeo de columnas -->
+        <div class="modal-step hidden" id="step-column-mapping">
+          <div class="step-title-row">
+            <h4>Mapeo de Columnas y Tipos de Datos</h4>
+            <div class="template-actions">
+              <label for="select-template">Plantilla:</label>
+              <select id="select-template" class="form-control-sm">
+                <option value="default">Detección Automática</option>
+              </select>
+              <button class="btn btn-xs btn-outline" id="btn-save-template">Guardar Plantilla</button>
+            </div>
+          </div>
+          
+          <p class="mapping-help">Mapea cada campo requerido del sistema a la columna correspondiente de tu archivo e indica el tipo de datos.</p>
+
+          <!-- Tabla de Mapeo Dinámico -->
+          <div class="mapping-table-container">
+            <table class="table" id="table-mapping">
+              <thead>
+                <tr>
+                  <th>Campo del Sistema</th>
+                  <th>Requerido</th>
+                  <th>Columna en CSV</th>
+                  <th>Tipo de Dato</th>
+                </tr>
+              </thead>
+              <tbody id="mapping-rows">
+                <!-- Se llena dinámicamente -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Vista Previa de Datos -->
+          <div class="preview-title mt-3">Vista Previa del Archivo (Primeras 5 filas)</div>
+          <div class="preview-table-container">
+            <table class="table table-sm" id="table-preview">
+              <!-- Se llena dinámicamente -->
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-modal-back" onclick="app.importer.modalBack()" disabled>Atrás</button>
+        <button class="btn btn-primary" id="btn-modal-next" onclick="app.importer.modalNext()">Siguiente</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts del Prototipo GeoMet -->
+  <script src="js/presets.js"></script>
+  <script src="js/octree.js"></script>
+  <script src="js/dxf-parser.js"></script>
+  <script src="js/scene.js"></script>
+  <script src="js/importer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
