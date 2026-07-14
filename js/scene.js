@@ -140,8 +140,15 @@ class GeometScene {
     this.blockOpacity = 1.0;
     this.drillholeThickness = 5.0;
     this.samplePointSize = 6.0;  // px (tamaño fijo en pantalla, no se atenúa con la distancia)
-    this.dxfColor = 0x475569;    // Gris azulado mineral (color por defecto de las superficies DXF)
-    this.dxfOpacity = 0.7;
+    // Estilo POR CAPA de las superficies DXF: cada capa (layerName -> {color,
+    // opacity}) mantiene su propio color/opacidad en vez de compartir un único
+    // valor global — así se pueden distinguir visualmente varias superficies
+    // cargadas a la vez (ej. topografía vs. diseño de mina). Ver
+    // addDxfLayer() (que inicializa la entrada la primera vez que aparece un
+    // nombre de capa) y updateDxfLayerStyle() (que la edita en vivo).
+    this.dxfLayerStyles = {};
+    this.defaultDxfColor = 0x475569;   // Gris azulado mineral, color inicial de cualquier capa nueva
+    this.defaultDxfOpacity = 0.7;
     this._dxfClipPlanes = [];    // clipping planes activos (ver updateDxfSectionClip)
 
     // Raycasting & Tooltips
@@ -1463,26 +1470,36 @@ class GeometScene {
   addDxfLayer(layerName, dxfData) {
     // Eliminar si ya existe
     this.removeDxfLayer(layerName);
-    
+
+    // Estilo propio de esta capa (color/opacidad independientes del resto de
+    // superficies DXF cargadas). Si el nombre de capa ya tenía un estilo
+    // asignado antes en esta sesión (ej. se reimportó el mismo archivo), se
+    // conserva en vez de resetear a los valores por defecto.
+    if (!this.dxfLayerStyles[layerName]) {
+      this.dxfLayerStyles[layerName] = { color: this.defaultDxfColor, opacity: this.defaultDxfOpacity };
+    }
+    const style = this.dxfLayerStyles[layerName];
+
     const layerGroup = new THREE.Group();
     layerGroup.name = `dxf_${layerName}`;
-    
+
     // 1. Renderizar Caras (Triángulos de superficies/TIN)
     if (dxfData.triangles && dxfData.triangles.length > 0) {
       const geom = new THREE.BufferGeometry();
       geom.setAttribute('position', new THREE.Float32BufferAttribute(dxfData.triangles, 3));
       geom.computeVertexNormals();
-      
+
       // Material de topografía semi-translúcido con iluminación. Color y
-      // opacidad salen de this.dxfColor/this.dxfOpacity (editables desde el
-      // panel Visualización > Superficies DXF) en vez de quedar fijos, para
-      // que updateDxfStyle() pueda ajustarlos en vivo sin reconstruir la
+      // opacidad salen del estilo propio de esta capa (this.dxfLayerStyles[layerName],
+      // editable desde el panel Visualización > Superficies DXF, seleccionando
+      // esta capa en el combo "Capa DXF") en vez de quedar fijos, para que
+      // updateDxfLayerStyle() pueda ajustarlos en vivo sin reconstruir la
       // geometría.
       const meshMat = new THREE.MeshLambertMaterial({
-        color: this.dxfColor,
+        color: style.color,
         side: THREE.DoubleSide,
-        transparent: this.dxfOpacity < 1,
-        opacity: this.dxfOpacity,
+        transparent: style.opacity < 1,
+        opacity: style.opacity,
         wireframe: false
       });
       
@@ -1543,28 +1560,36 @@ class GeometScene {
   }
 
   /**
-   * Aplica this.dxfColor/this.dxfOpacity a todas las superficies DXF ya
-   * cargadas, en vivo. A diferencia de Bloques/Sondajes/Muestras, las capas
-   * DXF no se reconstruyen desde datos crudos en cada cambio de estilo: solo
-   * se actualiza el material del mesh de caras ya existente (mucho más
-   * rápido, y funciona sin importar cuántas superficies/triángulos haya
-   * cargados). El wireframe de contorno y las polilíneas/contornos DXF
-   * (LINE/LWPOLYLINE, en cian) mantienen su propio color fijo — el control
-   * de color solo afecta el relleno de la superficie.
+   * Actualiza el color y/o la opacidad de UNA capa DXF puntual (identificada
+   * por layerName), no de todas — a diferencia de la versión anterior de este
+   * método, que aplicaba un único color/opacidad global a cada superficie
+   * cargada. `changes` es un objeto parcial ({ color? , opacity? }): solo se
+   * sobreescribe lo que venga definido, así el color picker y el slider de
+   * opacidad del panel Visualización > Superficies DXF pueden dispararse por
+   * separado sin pisarse entre sí.
+   *
+   * Al igual que antes, esto solo muta el material del mesh de caras ya
+   * existente (sin reconstruir geometría). El wireframe de contorno y las
+   * polilíneas/contornos DXF (LINE/LWPOLYLINE, en cian) mantienen su propio
+   * color fijo — el control de color solo afecta el relleno de la superficie.
    */
-  updateDxfStyle() {
-    const colorObj = new THREE.Color(this.dxfColor);
-    for (const layerName in this.dxfMeshes) {
-      const layerGroup = this.dxfMeshes[layerName];
-      layerGroup.children.forEach(child => {
-        if (child.isMesh && child.material) {
-          child.material.color.copy(colorObj);
-          child.material.opacity = this.dxfOpacity;
-          child.material.transparent = this.dxfOpacity < 1;
-          child.material.needsUpdate = true;
-        }
-      });
-    }
+  updateDxfLayerStyle(layerName, changes) {
+    if (!this.dxfLayerStyles[layerName]) return;
+    Object.assign(this.dxfLayerStyles[layerName], changes);
+    const style = this.dxfLayerStyles[layerName];
+
+    const layerGroup = this.dxfMeshes[layerName];
+    if (!layerGroup) return; // Estilo guardado pero la capa no está cargada ahora mismo
+
+    const colorObj = new THREE.Color(style.color);
+    layerGroup.children.forEach(child => {
+      if (child.isMesh && child.material) {
+        child.material.color.copy(colorObj);
+        child.material.opacity = style.opacity;
+        child.material.transparent = style.opacity < 1;
+        child.material.needsUpdate = true;
+      }
+    });
   }
 
   /**

@@ -182,26 +182,41 @@ class GeometApp {
       });
     }
 
-    // Superficies DXF: color y transparencia. A diferencia de Bloques/
-    // Sondajes/Muestras (que se re-generan desde los datos crudos en cada
-    // cambio vía trigger*Refresh), las capas DXF ya son mallas de Three.js
-    // armadas una sola vez al importar — así que en vez de reconstruirlas,
-    // updateDxfStyle() solo actualiza el material existente in-place.
+    // Superficies DXF: color y transparencia POR CAPA (cada superficie DXF
+    // cargada mantiene su propio estilo — ver scene.dxfLayerStyles). El combo
+    // "Capa DXF" (poblado dinámicamente por updateDxfLayerSelector(), llamado
+    // desde updateLayersTree() cada vez que cambian las capas cargadas) decide
+    // a cuál capa aplican el color picker y el slider de abajo. A diferencia
+    // de Bloques/Sondajes/Muestras (que se re-generan desde los datos crudos
+    // en cada cambio vía trigger*Refresh), las capas DXF ya son mallas de
+    // Three.js armadas una sola vez al importar — así que en vez de
+    // reconstruirlas, updateDxfLayerStyle() solo actualiza el material
+    // existente in-place.
+    const selectDxfLayer = document.getElementById('select-dxf-layer');
+    if (selectDxfLayer) {
+      selectDxfLayer.addEventListener('change', (e) => {
+        this.syncDxfStyleControls(e.target.value || null);
+      });
+    }
+
     const inputDxfColor = document.getElementById('input-dxf-color');
     if (inputDxfColor) {
       inputDxfColor.addEventListener('input', (e) => {
-        this.scene.dxfColor = parseInt(e.target.value.replace('#', '0x'), 16);
-        this.scene.updateDxfStyle();
+        const layerName = selectDxfLayer ? selectDxfLayer.value : null;
+        if (!layerName) return;
+        const colorHex = parseInt(e.target.value.replace('#', '0x'), 16);
+        this.scene.updateDxfLayerStyle(layerName, { color: colorHex });
       });
     }
 
     const rangeDxfOpacity = document.getElementById('range-dxf-opacity');
     if (rangeDxfOpacity) {
       rangeDxfOpacity.addEventListener('input', (e) => {
+        const layerName = selectDxfLayer ? selectDxfLayer.value : null;
+        if (!layerName) return;
         const val = parseFloat(e.target.value);
         document.getElementById('dxf-opacity-val').innerText = `${Math.round(val * 100)}%`;
-        this.scene.dxfOpacity = val;
-        this.scene.updateDxfStyle();
+        this.scene.updateDxfLayerStyle(layerName, { opacity: val });
       });
     }
 
@@ -1144,6 +1159,70 @@ class GeometApp {
     // Actualizar badge
     const layerCount = (this.blockData ? 1 : 0) + (this.drillholeData ? 1 : 0) + (this.samplesData ? 1 : 0) + dxfKeys.length;
     document.getElementById('layer-count').innerText = layerCount;
+
+    // Refrescar el combo "Capa DXF" del panel Visualización con las capas
+    // DXF actualmente cargadas (ver updateDxfLayerSelector()).
+    this.updateDxfLayerSelector();
+  }
+
+  /**
+   * Puebla el combo #select-dxf-layer (panel Visualización > Superficies DXF)
+   * con los nombres de las capas DXF cargadas actualmente, preservando la
+   * selección previa si esa capa sigue existiendo. Se llama desde
+   * updateLayersTree() cada vez que cambian las capas (ej. tras importar un
+   * nuevo DXF), para que el selector de "a qué capa le aplico el color/opacidad"
+   * siempre esté al día.
+   */
+  updateDxfLayerSelector() {
+    const select = document.getElementById('select-dxf-layer');
+    if (!select) return;
+
+    const dxfKeys = Object.keys(this.scene.dxfMeshes);
+    const prevValue = select.value;
+    select.innerHTML = '';
+
+    if (dxfKeys.length === 0) {
+      select.innerHTML = '<option value="">— Sin capas DXF cargadas —</option>';
+      select.disabled = true;
+      this.syncDxfStyleControls(null);
+      return;
+    }
+
+    dxfKeys.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.innerText = name;
+      select.appendChild(opt);
+    });
+    select.disabled = false;
+    select.value = dxfKeys.includes(prevValue) ? prevValue : dxfKeys[0];
+    this.syncDxfStyleControls(select.value);
+  }
+
+  /**
+   * Sincroniza el color picker y el slider de opacidad del panel Visualización
+   * con el estilo guardado (scene.dxfLayerStyles) de la capa DXF indicada, y
+   * los habilita/deshabilita según si hay o no una capa seleccionada. Se llama
+   * al refrescar el combo de capas y cada vez que el usuario cambia de capa
+   * seleccionada, para que los controles siempre reflejen la capa activa (y
+   * no arrastren el valor de la capa anterior).
+   */
+  syncDxfStyleControls(layerName) {
+    const inputColor = document.getElementById('input-dxf-color');
+    const rangeOpacity = document.getElementById('range-dxf-opacity');
+    const opacityVal = document.getElementById('dxf-opacity-val');
+    if (!inputColor || !rangeOpacity) return;
+
+    const style = layerName ? this.scene.dxfLayerStyles[layerName] : null;
+    const color = style ? style.color : this.scene.defaultDxfColor;
+    const opacity = style ? style.opacity : this.scene.defaultDxfOpacity;
+
+    inputColor.value = '#' + color.toString(16).padStart(6, '0');
+    rangeOpacity.value = opacity;
+    if (opacityVal) opacityVal.innerText = `${Math.round(opacity * 100)}%`;
+
+    inputColor.disabled = !layerName;
+    rangeOpacity.disabled = !layerName;
   }
 
   createTreeNode(parent, name, defaultChecked, onChangeCallback) {
