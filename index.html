@@ -213,7 +213,16 @@
               <span class="info-label">Nota: El modo "Cajas" se limita a 500k bloques visibles por rendimiento.</span>
             </div>
 
-            <div class="viz-subsection-title no-border-top">Modelo de Bloques</div>
+            <div class="viz-subsection-title viz-subsection-title-row no-border-top">
+              <span>Modelo de Bloques</span>
+              <div class="legend-toggle-inline" title="Mostrar/ocultar la leyenda de esta capa">
+                <span>Leyenda</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-legend-blocks" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
 
             <div class="settings-group">
               <label for="select-color-attribute-blocks">Atributo Activo (Coloreado)</label>
@@ -229,6 +238,22 @@
                 <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
                 <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
                 <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+                <button class="palette-btn" data-palette="custom" id="palette-btn-custom-blocks" style="background: linear-gradient(to right, #2563eb, #dc2626);" title="Paleta personalizada"></button>
+              </div>
+            </div>
+
+            <!-- Colores Personalizados (solo visible con la paleta "custom" seleccionada) -->
+            <div class="settings-group hidden" id="group-custom-palette-blocks">
+              <label>Colores Personalizados</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="color" id="input-custom-color-min-blocks" class="form-control color-range-input" value="#2563eb">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="color" id="input-custom-color-max-blocks" class="form-control color-range-input" value="#dc2626">
+                </div>
               </div>
             </div>
 
@@ -266,7 +291,16 @@
               </div>
             </div>
 
-            <div class="viz-subsection-title">Sondajes</div>
+            <div class="viz-subsection-title viz-subsection-title-row">
+              <span>Sondajes</span>
+              <div class="legend-toggle-inline" title="Mostrar/ocultar la leyenda de esta capa">
+                <span>Leyenda</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-legend-drillholes" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
 
             <div class="settings-group">
               <label for="select-color-attribute-drillholes">Atributo Activo (Coloreado)</label>
@@ -282,6 +316,22 @@
                 <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
                 <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
                 <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+                <button class="palette-btn" data-palette="custom" id="palette-btn-custom-drillholes" style="background: linear-gradient(to right, #16a34a, #f59e0b);" title="Paleta personalizada"></button>
+              </div>
+            </div>
+
+            <!-- Colores Personalizados (solo visible con la paleta "custom" seleccionada) -->
+            <div class="settings-group hidden" id="group-custom-palette-drillholes">
+              <label>Colores Personalizados</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="color" id="input-custom-color-min-drillholes" class="form-control color-range-input" value="#16a34a">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="color" id="input-custom-color-max-drillholes" class="form-control color-range-input" value="#f59e0b">
+                </div>
               </div>
             </div>
 
@@ -311,7 +361,16 @@
               </div>
             </div>
 
-            <div class="viz-subsection-title">Muestras Metalúrgicas</div>
+            <div class="viz-subsection-title viz-subsection-title-row">
+              <span>Muestras Metalúrgicas</span>
+              <div class="legend-toggle-inline" title="Mostrar/ocultar la leyenda de esta capa">
+                <span>Leyenda</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-legend-samples" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
 
             <div class="settings-group">
               <label for="select-color-attribute-samples">Atributo Activo (Coloreado)</label>
@@ -327,6 +386,22 @@
                 <button class="palette-btn" data-palette="viridis" style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></button>
                 <button class="palette-btn" data-palette="magma" style="background: linear-gradient(to right, #000004, #b1357a, #fcfdbf);"></button>
                 <button class="palette-btn" data-palette="coolwarm" style="background: linear-gradient(to right, blue, white, red);"></button>
+                <button class="palette-btn" data-palette="custom" id="palette-btn-custom-samples" style="background: linear-gradient(to right, #a855f7, #f43f5e);" title="Paleta personalizada"></button>
+              </div>
+            </div>
+
+            <!-- Colores Personalizados (solo visible con la paleta "custom" seleccionada) -->
+            <div class="settings-group hidden" id="group-custom-palette-samples">
+              <label>Colores Personalizados</label>
+              <div class="color-range-row">
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-min-swatch">▮ Mín.</span>
+                  <input type="color" id="input-custom-color-min-samples" class="form-control color-range-input" value="#a855f7">
+                </div>
+                <div class="color-range-field">
+                  <span class="color-range-label color-range-max-swatch">▮ Máx.</span>
+                  <input type="color" id="input-custom-color-max-samples" class="form-control color-range-input" value="#f43f5e">
+                </div>
               </div>
             </div>
 

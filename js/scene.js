@@ -140,6 +140,24 @@ class GeometScene {
     this.blockOpacity = 1.0;
     this.drillholeThickness = 5.0;
     this.samplePointSize = 6.0;  // px (tamaño fijo en pantalla, no se atenúa con la distancia)
+
+    // Colores de la paleta "Personalizada" (paletteName === 'custom'), propios
+    // de cada capa coloreada por atributo (Bloques/Sondajes/Muestras), para
+    // poder diferenciarlas visualmente entre sí sin depender de las 4 paletas
+    // fijas (Rainbow/Viridis/Magma/Coolwarm). Ver getColorForValue().
+    this.customPaletteColors = {
+      blocks: { min: 0x2563eb, max: 0xdc2626 },      // azul -> rojo
+      drillholes: { min: 0x16a34a, max: 0xf59e0b },  // verde -> ámbar
+      samples: { min: 0xa855f7, max: 0xf43f5e }      // violeta -> rosa
+    };
+
+    // Visibilidad persistente de la leyenda de cada capa coloreada por
+    // atributo. A diferencia del botón "×" de la tarjeta de leyenda (que solo
+    // la ocultaba hasta el próximo refresh de datos, momento en el que
+    // updateLegend() la volvía a mostrar), este flag se respeta en cada
+    // llamada a updateLegend() — ver ese método y setLegendVisible().
+    this.legendVisible = { blocks: true, drillholes: true, samples: true };
+    this._lastLegendParams = {}; // últimos parámetros de cada leyenda, para poder re-renderizarla al reactivarla sin depender de un nuevo render de datos
     // Estilo POR CAPA de las superficies DXF: cada capa (layerName -> {color,
     // opacity}) mantiene su propio color/opacidad en vez de compartir un único
     // valor global — así se pueden distinguir visualmente varias superficies
@@ -741,17 +759,22 @@ class GeometScene {
   // ==========================================
   // PALETAS DE COLOR DE LEYES Y CATEGORÍAS
   // ==========================================
-  getColorForValue(val, min, max, paletteName) {
+  getColorForValue(val, min, max, paletteName, customColors) {
     if (val === null || val === undefined || isNaN(val) || val === -999.0) {
       return new THREE.Color(0x4b5563); // Gris para nulos
     }
-    
+
     let t = (val - min) / (max - min);
     if (isNaN(t)) t = 0.5;
     t = Math.max(0, Math.min(1, t)); // clamp
-    
+
     // Diferentes esquemas de color
-    if (paletteName === 'viridis') {
+    if (paletteName === 'custom' && customColors) {
+      // Paleta personalizada: interpolación lineal RGB entre los dos colores
+      // elegidos por el usuario para esta capa (ver this.customPaletteColors
+      // y el panel Visualización > Esquema de Colores > Personalizada).
+      return new THREE.Color(customColors.min).lerp(new THREE.Color(customColors.max), t);
+    } else if (paletteName === 'viridis') {
       // Viridis: purpura -> verde -> amarillo
       const r = 0.2678 + 0.6278 * t - 0.8956 * t*t;
       const g = 0.0049 + 1.4883 * t - 0.4932 * t*t;
@@ -881,7 +904,8 @@ class GeometScene {
     const positions = blockData.positions;
     const sizes = blockData.sizes;
     const attrBuffer = activeAttribute ? blockData.attributes[activeAttribute] : null;
-    
+    const customColors = this.customPaletteColors.blocks;
+
     if (mode === 'points') {
       // 1. RENDER COMO NUBE DE PUNTOS (THREE.Points)
       const geom = new THREE.BufferGeometry();
@@ -904,7 +928,7 @@ class GeometScene {
           if (isCategorical) {
             col = this.getDiscreteColor(val);
           } else {
-            col = this.getColorForValue(val, minVal, maxVal, paletteName);
+            col = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
         }
         
@@ -966,7 +990,7 @@ class GeometScene {
           if (isCategorical) {
             c = this.getDiscreteColor(val);
           } else {
-            c = this.getColorForValue(val, minVal, maxVal, paletteName);
+            c = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
         }
         this.blockMesh.setColorAt(i, c);
@@ -1217,6 +1241,8 @@ class GeometScene {
       }
     }
 
+    const customColors = this.customPaletteColors.drillholes;
+
     // Dibujar cada intervalo como un cilindro instanciado
     // Geometría base: Cilindro apuntando en el eje Y
     const cylGeom = new THREE.CylinderGeometry(0.5, 0.5, 1.0, 6);
@@ -1263,7 +1289,7 @@ class GeometScene {
             const catId = lookupTable.indexOf(val);
             c = this.getDiscreteColor(catId);
           } else {
-            c = this.getColorForValue(val, minVal, maxVal, paletteName);
+            c = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
         }
       }
@@ -1370,6 +1396,7 @@ class GeometScene {
     const geom = new THREE.BufferGeometry();
     const pointPositions = new Float32Array(activeCount * 3);
     const pointColors = new Float32Array(activeCount * 3);
+    const customColors = this.customPaletteColors.samples;
 
     for (let i = 0; i < activeCount; i++) {
       const idx = indicesToRender[i];
@@ -1385,7 +1412,7 @@ class GeometScene {
       let col = new THREE.Color(0xf59e0b);
       if (attrBuffer) {
         const val = attrBuffer[idx];
-        col = isCategorical ? this.getDiscreteColor(val) : this.getColorForValue(val, minVal, maxVal, paletteName);
+        col = isCategorical ? this.getDiscreteColor(val) : this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
       }
 
       pointColors[i * 3] = col.r;
@@ -1780,7 +1807,18 @@ class GeometScene {
     const legendEl = document.getElementById(`legend-${suffix}`);
     if (!legendEl) return;
 
-    if (!attrMeta) {
+    // Guardar los últimos parámetros con los que se pidió esta leyenda, para
+    // poder re-renderizarla al reactivar el switch "Leyenda" del panel
+    // Visualización sin depender de un nuevo render de datos (ver
+    // setLegendVisible()).
+    this._lastLegendParams[target] = { attrMeta, minVal, maxVal, lookupTable, paletteName };
+
+    // Si no hay atributo activo, o el usuario apagó la leyenda de esta capa
+    // desde el switch "Leyenda" (this.legendVisible[target]), se mantiene
+    // oculta. A diferencia del comportamiento anterior, este flag persiste:
+    // ya no se reactiva sola en el próximo refresh de datos (cambio de
+    // filtro, atributo, paleta, etc.).
+    if (!attrMeta || !this.legendVisible[target]) {
       legendEl.classList.add('hidden');
       return;
     }
@@ -1808,11 +1846,12 @@ class GeometScene {
     } else {
       // Leyenda de gradiente continuo (5 tramos)
       const palette = paletteName || this.colorPaletteName;
+      const customColors = this.customPaletteColors[target];
       const steps = 5;
       for (let i = 0; i < steps; i++) {
         const t = i / (steps - 1);
         const val = minVal + t * (maxVal - minVal);
-        const col = this.getColorForValue(val, minVal, maxVal, palette);
+        const col = this.getColorForValue(val, minVal, maxVal, palette, customColors);
         const hex = `#${col.getHexString()}`;
 
         const row = document.createElement('div');
@@ -1826,8 +1865,30 @@ class GeometScene {
     }
   }
 
+  /**
+   * Cambia la visibilidad PERSISTENTE de la leyenda de una capa (llamado
+   * tanto por el switch "Leyenda" del panel Visualización como por el botón
+   * "×" de la propia tarjeta de leyenda en el visor, para que ambos controles
+   * queden siempre sincronizados entre sí). Re-renderiza la leyenda con los
+   * últimos parámetros conocidos si se está reactivando, en vez de esperar a
+   * que ocurra un nuevo render de datos.
+   */
+  setLegendVisible(target, visible) {
+    this.legendVisible[target] = visible;
+
+    const chk = document.getElementById(`chk-legend-${target}`);
+    if (chk) chk.checked = visible;
+
+    const params = this._lastLegendParams[target];
+    if (params) {
+      this.updateLegend(target, params.attrMeta, params.minVal, params.maxVal, params.lookupTable, params.paletteName);
+    } else {
+      const legendEl = document.getElementById(`legend-${target}`);
+      if (legendEl) legendEl.classList.toggle('hidden', !visible);
+    }
+  }
+
   toggleLegend(target) {
-    const legendEl = document.getElementById(`legend-${target}`);
-    if (legendEl) legendEl.classList.toggle('hidden');
+    this.setLegendVisible(target, !this.legendVisible[target]);
   }
 }

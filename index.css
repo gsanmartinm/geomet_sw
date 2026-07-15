@@ -716,6 +716,27 @@ input[type="color"].form-control {
   padding-top: 0;
   border-top: none;
 }
+/* Título de subsección + switch de "Leyenda" en la misma fila (Bloques/
+   Sondajes/Muestras): el switch reutiliza .viz-subsection-title para el
+   margen/borde superior, así que solo necesita display:flex encima. */
+.viz-subsection-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.legend-toggle-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-toggle-inline span {
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-muted);
+}
 
 .range-with-value {
   display: flex;

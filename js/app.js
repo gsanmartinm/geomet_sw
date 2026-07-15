@@ -220,6 +220,20 @@ class GeometApp {
       });
     }
 
+    // Switch "Leyenda" de cada subsección (Bloques/Sondajes/Muestras): oculta
+    // o muestra la tarjeta de leyenda de esa capa de forma persistente (ver
+    // scene.setLegendVisible — a diferencia del botón "×" de la tarjeta, que
+    // antes se re-mostraba solo con el próximo refresh de datos, este estado
+    // se respeta en updateLegend() y no se pisa solo).
+    ['blocks', 'drillholes', 'samples'].forEach(target => {
+      const chkLegend = document.getElementById(`chk-legend-${target}`);
+      if (chkLegend) {
+        chkLegend.addEventListener('change', (e) => {
+          this.scene.setLegendVisible(target, e.target.checked);
+        });
+      }
+    });
+
     // Sección de Corte (Sliders & Checkbox)
     const chkSection = document.getElementById('chk-section-active');
     const sectionControls = document.getElementById('section-controls-container');
@@ -419,6 +433,7 @@ class GeometApp {
 
     // Paleta de colores (solo afecta los botones dentro de esta capa)
     const paletteContainer = document.querySelector(`.palette-picker[data-viz-target="${target}"]`);
+    const groupCustomPalette = document.getElementById(`group-custom-palette-${target}`);
     if (paletteContainer) {
       const paletteBtns = paletteContainer.querySelectorAll('.palette-btn');
       paletteBtns.forEach(btn => {
@@ -426,11 +441,37 @@ class GeometApp {
           paletteBtns.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           this[paletteKey] = btn.dataset.palette;
+          // Los 2 color pickers de "Colores Personalizados" solo son
+          // relevantes (y solo se muestran) cuando esta capa tiene
+          // seleccionada la paleta "custom".
+          if (groupCustomPalette) groupCustomPalette.classList.toggle('hidden', btn.dataset.palette !== 'custom');
           this.updateColorRangePreviewBar(target);
           refresh();
         });
       });
     }
+
+    // Colores Personalizados (paleta "custom"): cada capa tiene su propio par
+    // min/max en scene.customPaletteColors[target], independiente del resto,
+    // para poder diferenciar visualmente Bloques/Sondajes/Muestras entre sí.
+    const inputCustomMin = document.getElementById(`input-custom-color-min-${target}`);
+    const inputCustomMax = document.getElementById(`input-custom-color-max-${target}`);
+    const paletteBtnCustom = document.getElementById(`palette-btn-custom-${target}`);
+    const applyCustomColorChange = () => {
+      const minHex = inputCustomMin ? parseInt(inputCustomMin.value.replace('#', '0x'), 16) : null;
+      const maxHex = inputCustomMax ? parseInt(inputCustomMax.value.replace('#', '0x'), 16) : null;
+      if (minHex !== null) this.scene.customPaletteColors[target].min = minHex;
+      if (maxHex !== null) this.scene.customPaletteColors[target].max = maxHex;
+      // Refleja los colores elegidos también en el propio swatch del botón de
+      // paleta, para que quede visible sin tener que abrir los color pickers.
+      if (paletteBtnCustom && inputCustomMin && inputCustomMax) {
+        paletteBtnCustom.style.background = `linear-gradient(to right, ${inputCustomMin.value}, ${inputCustomMax.value})`;
+      }
+      this.updateColorRangePreviewBar(target);
+      refresh();
+    };
+    if (inputCustomMin) inputCustomMin.addEventListener('input', applyCustomColorChange);
+    if (inputCustomMax) inputCustomMax.addEventListener('input', applyCustomColorChange);
 
     // Rango de color manual
     const minColorInput = document.getElementById(`input-color-min-${target}`);
@@ -1006,7 +1047,11 @@ class GeometApp {
       : target === 'samples' ? this.samplePaletteName
       : this.dhPaletteName;
     let gradient = 'linear-gradient(to right, blue, green, yellow, red)';
-    if (palette === 'viridis') {
+    if (palette === 'custom') {
+      const c = this.scene.customPaletteColors[target];
+      const toHex = (n) => '#' + n.toString(16).padStart(6, '0');
+      gradient = `linear-gradient(to right, ${toHex(c.min)}, ${toHex(c.max)})`;
+    } else if (palette === 'viridis') {
       gradient = 'linear-gradient(to right, #440154, #21918c, #fde725)';
     } else if (palette === 'magma') {
       gradient = 'linear-gradient(to right, #000004, #b1357a, #fcfdbf)';
@@ -1101,6 +1146,118 @@ class GeometApp {
   }
 
   // ==========================================
+  // ELIMINAR CAPAS DE LA SESIÓN
+  // ==========================================
+  /**
+   * Elimina COMPLETAMENTE una capa base (Bloques/Sondajes/Muestras) de la
+   * sesión — a diferencia del checkbox de visibilidad del árbol de capas
+   * (que solo la oculta), esto libera los datos cargados, el mesh de
+   * Three.js, los filtros activos, y resetea los controles de UI asociados
+   * (selector de atributo, badge de estado, estadísticas, leyenda). Después
+   * de esto hay que volver a importar el archivo para verla de nuevo.
+   */
+  removeLayer(target) {
+    const cfg = {
+      blocks: {
+        label: 'Modelo de Bloques',
+        clear: () => {
+          this.blockData = null;
+          this.scene.updateBlockRender(null);
+          this.spatialIndex = null; // el Octree solo se usa para filtrar Bloques por sección
+          this.filters = [];
+          this.blockColorAttribute = '';
+          this.renderFilterPills('blocks');
+        },
+        statusId: 'status-blocks',
+        selectId: 'select-color-attribute-blocks',
+        countIds: ['stat-blocks-count'],
+        resetLimits: true
+      },
+      drillholes: {
+        label: 'Sondajes',
+        clear: () => {
+          this.drillholeData = null;
+          this.scene.updateDrillholeRender(null);
+          this.dhFilters = [];
+          this.dhColorAttribute = '';
+          this.renderFilterPills('drillholes');
+        },
+        statusId: 'status-drillholes',
+        selectId: 'select-color-attribute-drillholes',
+        countIds: ['stat-holes-count', 'stat-intervals-count']
+      },
+      samples: {
+        label: 'Muestras Metalúrgicas',
+        clear: () => {
+          this.samplesData = null;
+          this.scene.updateSamplesRender(null);
+          this.sampleFilters = [];
+          this.sampleColorAttribute = '';
+          this.renderFilterPills('samples');
+        },
+        statusId: 'status-samples',
+        selectId: 'select-color-attribute-samples',
+        countIds: ['stat-samples-count']
+      }
+    }[target];
+    if (!cfg) return;
+
+    cfg.clear();
+
+    // updateXRender(null) ya oculta la leyenda en Sondajes/Muestras, pero NO
+    // en Bloques (retorna antes de llegar a esa línea) — se fuerza acá para
+    // los 3 casos, por consistencia, sin importar el detalle interno de cada uno.
+    this.scene.updateLegend(target, null);
+
+    const statusEl = document.getElementById(cfg.statusId);
+    if (statusEl) { statusEl.className = 'badge badge-empty'; statusEl.innerText = 'Vacío'; }
+
+    const selectEl = document.getElementById(cfg.selectId);
+    if (selectEl) selectEl.innerHTML = '<option value="">(Ninguno)</option>';
+
+    cfg.countIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerText = '0';
+    });
+
+    if (cfg.resetLimits) {
+      ['stat-lim-x', 'stat-lim-y', 'stat-lim-z'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = '-';
+      });
+    }
+
+    this.updateColorRangeUI(target);
+    this.updateLayersTree();
+    this.logConsole('info', `${cfg.label} eliminado de la sesión.`);
+  }
+
+  /**
+   * Elimina UNA capa DXF puntual (identificada por su nombre de capa) de la
+   * sesión: libera su mesh/material y su estilo guardado (color/opacidad).
+   */
+  removeDxfLayerByName(layerName) {
+    this.scene.removeDxfLayer(layerName);
+    delete this.scene.dxfLayerStyles[layerName];
+    this.updateLayersTree();
+    this.logConsole('info', `Capa DXF "${layerName}" eliminada de la sesión.`);
+  }
+
+  /**
+   * Elimina TODAS las capas DXF cargadas de una vez (botón de eliminar del
+   * nodo raíz "Superficies DXF" en el árbol de capas).
+   */
+  removeAllDxfLayers() {
+    const dxfKeys = Object.keys(this.scene.dxfMeshes);
+    dxfKeys.forEach(layerName => {
+      this.scene.removeDxfLayer(layerName);
+      delete this.scene.dxfLayerStyles[layerName];
+    });
+    this.updateLayersTree();
+    this.logConsole('info', `${dxfKeys.length} capa(s) DXF eliminada(s) de la sesión.`);
+  }
+
+  // ==========================================
   // CAPAS TREE VIEW
   // ==========================================
   updateLayersTree() {
@@ -1114,15 +1271,15 @@ class GeometApp {
       hasLayers = true;
       this.createTreeNode(tree, 'Modelo de Bloques', true, (chk) => {
         if (this.scene.blockMesh) this.scene.blockMesh.visible = chk;
-      });
+      }, () => this.removeLayer('blocks'));
     }
-    
+
     // Nodo Sondajes
     if (this.drillholeData) {
       hasLayers = true;
       this.createTreeNode(tree, 'Trazas de Sondaje', true, (chk) => {
         this.scene.drillholesGroup.visible = chk;
-      });
+      }, () => this.removeLayer('drillholes'));
     }
 
     // Nodo Muestras Metalúrgicas
@@ -1130,7 +1287,7 @@ class GeometApp {
       hasLayers = true;
       this.createTreeNode(tree, 'Muestras Metalúrgicas', true, (chk) => {
         if (this.scene.sampleMesh) this.scene.sampleMesh.visible = chk;
-      });
+      }, () => this.removeLayer('samples'));
     }
 
     // Nodos DXF
@@ -1139,16 +1296,16 @@ class GeometApp {
       hasLayers = true;
       const dxfRoot = this.createTreeNode(tree, 'Superficies DXF', true, (chk) => {
         this.scene.dxfGroup.visible = chk;
-      });
-      
+      }, () => this.removeAllDxfLayers());
+
       const childrenContainer = document.createElement('div');
       childrenContainer.className = 'tree-children';
       dxfRoot.appendChild(childrenContainer);
-      
+
       dxfKeys.forEach(layerName => {
         this.createTreeNode(childrenContainer, `Capa: ${layerName}`, true, (chk) => {
           this.scene.toggleLayerVisibility(layerName, chk);
-        });
+        }, () => this.removeDxfLayerByName(layerName));
       });
     }
     
@@ -1225,30 +1382,52 @@ class GeometApp {
     rangeOpacity.disabled = !layerName;
   }
 
-  createTreeNode(parent, name, defaultChecked, onChangeCallback) {
+  /**
+   * @param {Function} [onDeleteCallback] Si se provee, agrega un botón "✕" a
+   *   la derecha del nodo (además del checkbox de visibilidad) que ELIMINA la
+   *   capa de la sesión por completo (libera datos/mesh, no solo la oculta).
+   *   Pide confirmación antes de ejecutar, ya que no hay forma de deshacerlo
+   *   sin volver a importar el archivo.
+   */
+  createTreeNode(parent, name, defaultChecked, onChangeCallback, onDeleteCallback) {
     const node = document.createElement('div');
     node.className = 'tree-node';
-    
+
     const content = document.createElement('div');
     content.className = 'tree-node-content';
-    
+
     const left = document.createElement('div');
     left.className = 'tree-node-left';
-    
+
     const chk = document.createElement('input');
     chk.type = 'checkbox';
     chk.checked = defaultChecked;
     chk.addEventListener('change', () => onChangeCallback(chk.checked));
-    
+
     const label = document.createElement('span');
     label.innerText = name;
-    
+
     left.appendChild(chk);
     left.appendChild(label);
     content.appendChild(left);
+
+    if (onDeleteCallback) {
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn-icon';
+      btnDelete.innerText = '✕';
+      btnDelete.title = `Eliminar "${name}" de la sesión`;
+      btnDelete.addEventListener('click', (e) => {
+        e.stopPropagation(); // no togglear el checkbox al hacer click en el botón
+        if (confirm(`¿Eliminar "${name}" de la sesión? Vas a tener que volver a importarlo si lo necesitás de nuevo.`)) {
+          onDeleteCallback();
+        }
+      });
+      content.appendChild(btnDelete);
+    }
+
     node.appendChild(content);
     parent.appendChild(node);
-    
+
     return node;
   }
 
