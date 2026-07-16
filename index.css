@@ -903,6 +903,43 @@ input:checked + .slider:before {
   color: var(--accent-amber);
 }
 
+/* Variables Calculadas: chips de atributos clickeables (insertan [Nombre] en
+   la fórmula) y caja de error de parseo/validación */
+.calc-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.calc-chip-btn {
+  background-color: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-main);
+  font-size: 0.68rem;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+.calc-chip-btn:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+.calc-builder-error {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--accent-red);
+  color: var(--accent-red);
+  font-size: 0.72rem;
+}
+.filter-pill .pill-formula {
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+
 .empty-notice {
   font-size: 0.75rem;
   color: var(--text-muted);

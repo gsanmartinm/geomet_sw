@@ -17,6 +17,13 @@ class GeometApp {
     this.dhFilters = [];     // Filtros activos de Sondajes (misma forma, independiente de bloques)
     this.sampleFilters = []; // Filtros activos de Muestras Metalúrgicas (misma forma, independiente)
 
+    // Variables Calculadas: atributos numéricos nuevos generados en base a
+    // los ya cargados (ej. CUS.CUT = [CUS]/[CUT]), independiente por capa.
+    // Cada entrada es {name, formula}. Son de sesión: se pierden si se
+    // reimporta esa capa o se elimina — ver loadBlockData/loadDrillholeData/
+    // loadSamplesData y removeLayer(). Ver openCalcBuilder()/confirmCalcBuilder().
+    this.calcVariables = { blocks: [], drillholes: [], samples: [] };
+
     // Estado de visualización independiente por capa (Bloques / Sondajes /
     // Muestras), para poder colorear cada una con su propio atributo, paleta y rango.
     this.blockColorAttribute = "";
@@ -396,6 +403,14 @@ class GeometApp {
     if (btnAddFilterSamples) {
       btnAddFilterSamples.addEventListener('click', () => this.openFilterBuilder('samples'));
     }
+
+    // Variables Calculadas (independiente para Bloques, Sondajes y Muestras)
+    ['blocks', 'drillholes', 'samples'].forEach(target => {
+      const btnAddCalc = document.getElementById(`btn-add-calc-${target}`);
+      if (btnAddCalc) {
+        btnAddCalc.addEventListener('click', () => this.openCalcBuilder(target));
+      }
+    });
   }
 
   /**
@@ -648,7 +663,13 @@ class GeometApp {
 
   loadBlockData(data, warnings) {
     this.blockData = data;
-    
+
+    // Un reimport reemplaza this.blockData.attributes por arrays completamente
+    // nuevos — las Variables Calculadas de la importación anterior quedarían
+    // apuntando a datos que ya no existen, así que se descartan acá.
+    this.calcVariables.blocks = [];
+    this.renderCalcPills('blocks');
+
     // Guardar logs de validación
     if (warnings) {
       warnings.forEach(w => this.logConsole('warn', w.msg, w.file, w.line));
@@ -716,7 +737,12 @@ class GeometApp {
 
   loadDrillholeData(data, warnings) {
     this.drillholeData = data;
-    
+
+    // Ver comentario equivalente en loadBlockData(): un reimport invalida las
+    // Variables Calculadas de la carga anterior.
+    this.calcVariables.drillholes = [];
+    this.renderCalcPills('drillholes');
+
     if (warnings) {
       warnings.forEach(w => this.logConsole('warn', w.msg, w.file, w.line));
     }
@@ -825,6 +851,11 @@ class GeometApp {
    */
   loadSamplesData(data, warnings) {
     this.samplesData = data;
+
+    // Ver comentario equivalente en loadBlockData(): un reimport invalida las
+    // Variables Calculadas de la carga anterior.
+    this.calcVariables.samples = [];
+    this.renderCalcPills('samples');
 
     if (warnings) {
       warnings.forEach(w => this.logConsole('warn', w.msg, w.file, w.line));
@@ -1167,6 +1198,11 @@ class GeometApp {
           this.filters = [];
           this.blockColorAttribute = '';
           this.renderFilterPills('blocks');
+          // Las Variables Calculadas dependen de los arrays de datos crudos
+          // (this.blockData.attributes), que se acaban de descartar arriba —
+          // no tiene sentido conservarlas.
+          this.calcVariables.blocks = [];
+          this.renderCalcPills('blocks');
         },
         statusId: 'status-blocks',
         selectId: 'select-color-attribute-blocks',
@@ -1181,6 +1217,8 @@ class GeometApp {
           this.dhFilters = [];
           this.dhColorAttribute = '';
           this.renderFilterPills('drillholes');
+          this.calcVariables.drillholes = [];
+          this.renderCalcPills('drillholes');
         },
         statusId: 'status-drillholes',
         selectId: 'select-color-attribute-drillholes',
@@ -1194,6 +1232,8 @@ class GeometApp {
           this.sampleFilters = [];
           this.sampleColorAttribute = '';
           this.renderFilterPills('samples');
+          this.calcVariables.samples = [];
+          this.renderCalcPills('samples');
         },
         statusId: 'status-samples',
         selectId: 'select-color-attribute-samples',
@@ -1712,6 +1752,396 @@ class GeometApp {
         <span class="pill-text">${text}</span>
         <button onclick="app.removeFilter('${target}', '${f.attribute}')" class="btn-icon" style="color:var(--accent-red)">×</button>
       `;
+      container.appendChild(pill);
+    });
+  }
+
+  // ==========================================
+  // VARIABLES CALCULADAS (independiente por capa: Bloques/Sondajes/Muestras)
+  // ==========================================
+  /**
+   * Escape mínimo para insertar nombres de atributos definidos por el usuario
+   * (headers de CSV, nombres de variable calculada) dentro de innerHTML sin
+   * que puedan romper el markup si contienen caracteres como < > " '.
+   */
+  escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Metadata de la capa indicada usada por todo el flujo de Variables
+   * Calculadas: cómo acceder a sus datos crudos, a su lista de atributos
+   * (attributeMetadata en Bloques/Muestras, assayMetadata en Sondajes), cómo
+   * calcular una fórmula fila por fila sobre ella, y cómo remover un atributo
+   * ya creado. Bloques y Muestras comparten la misma forma de almacenamiento
+   * (Float32Array por atributo + lista de metadata), así que reutilizan
+   * _computeArrayCalcVariable(); Sondajes guarda los valores por intervalo
+   * (interval.values), así que usa _computeIntervalCalcVariable().
+   */
+  _calcTargetMeta(target) {
+    if (target === 'blocks') {
+      return {
+        label: 'Bloques',
+        attrKey: 'blockColorAttribute',
+        selectId: 'select-color-attribute-blocks',
+        refresh: () => this.triggerBlockRefresh(),
+        getData: () => this.blockData,
+        getMetadataList: (data) => data.attributeMetadata,
+        compute: (data, name, ast) => this._computeArrayCalcVariable(data, name, ast),
+        removeAttr: (data, name) => { delete data.attributes[name]; }
+      };
+    }
+    if (target === 'samples') {
+      return {
+        label: 'Muestras',
+        attrKey: 'sampleColorAttribute',
+        selectId: 'select-color-attribute-samples',
+        refresh: () => this.triggerSamplesRefresh(),
+        getData: () => this.samplesData,
+        getMetadataList: (data) => data.attributeMetadata,
+        compute: (data, name, ast) => this._computeArrayCalcVariable(data, name, ast),
+        removeAttr: (data, name) => { delete data.attributes[name]; }
+      };
+    }
+    return {
+      label: 'Sondajes',
+      attrKey: 'dhColorAttribute',
+      selectId: 'select-color-attribute-drillholes',
+      refresh: () => this.triggerDrillholeRefresh(),
+      getData: () => this.drillholeData,
+      getMetadataList: (data) => {
+        if (!data.assayMetadata) data.assayMetadata = [];
+        return data.assayMetadata;
+      },
+      compute: (data, name, ast) => this._computeIntervalCalcVariable(data, name, ast),
+      removeAttr: (data, name) => {
+        (data.intervals || []).forEach(iv => { if (iv.values) delete iv.values[name]; });
+      }
+    };
+  }
+
+  /**
+   * Calcula una Variable Calculada sobre Bloques/Muestras: recorre en una
+   * sola pasada los Float32Array de las variables usadas en la fórmula
+   * (resueltos una única vez antes del loop, no en cada fila) y arma un
+   * Float32Array nuevo. Los -999 (convención de "sin dato" de estas dos
+   * capas) se traducen a `null` para FormulaEval y de vuelta a -999 en el
+   * resultado, para que la variable nueva se comporte igual que cualquier
+   * atributo nativo frente al resto de la app (rango automático, leyenda,
+   * filtros, etc., todos ya saben ignorar -999).
+   */
+  _computeArrayCalcVariable(data, name, ast) {
+    const count = data.count;
+    const out = new Float32Array(count);
+    let validCount = 0;
+
+    const varNames = Array.from(FormulaEval.collectVarNames(ast));
+    const buffers = {};
+    varNames.forEach(v => { buffers[v] = data.attributes[v]; });
+
+    for (let i = 0; i < count; i++) {
+      const lookup = (varName) => {
+        const buf = buffers[varName];
+        if (!buf) return null;
+        const raw = buf[i];
+        return raw === -999.0 ? null : raw;
+      };
+      const result = FormulaEval.evaluate(ast, lookup);
+      if (result === null) {
+        out[i] = -999.0;
+      } else {
+        out[i] = result;
+        validCount++;
+      }
+    }
+
+    data.attributes[name] = out;
+    return { validCount, totalCount: count };
+  }
+
+  /**
+   * Calcula una Variable Calculada sobre Sondajes: recorre los intervalos y
+   * escribe el resultado en interval.values[name]. A diferencia de Bloques/
+   * Muestras, acá "sin dato" se representa con `null` directamente (no hay
+   * sentinela -999 para los ensayos de sondaje — ver worker-parser.js), así
+   * que no hace falta traducir la convención en ningún sentido.
+   */
+  _computeIntervalCalcVariable(data, name, ast) {
+    const intervals = data.intervals || [];
+    let validCount = 0;
+
+    intervals.forEach(interval => {
+      const lookup = (varName) => {
+        const raw = interval.values ? interval.values[varName] : undefined;
+        if (raw === undefined || raw === null || (typeof raw === 'number' && isNaN(raw))) return null;
+        return raw;
+      };
+      const result = FormulaEval.evaluate(ast, lookup);
+      if (!interval.values) interval.values = {};
+      interval.values[name] = result; // FormulaEval ya devuelve null si no hay dato
+      if (result !== null) validCount++;
+    });
+
+    return { validCount, totalCount: intervals.length };
+  }
+
+  /**
+   * Abre el formulario de creación de una Variable Calculada para la capa
+   * indicada: nombre + fórmula + chips clickeables con los atributos
+   * numéricos disponibles (incluye tanto atributos nativos como Variables
+   * Calculadas creadas antes en la misma sesión, ya que ambas terminan en la
+   * misma lista de metadata — esto permite encadenarlas, ej. crear "A", y
+   * después una "B" que use [A] en su fórmula).
+   */
+  openCalcBuilder(target) {
+    const meta = this._calcTargetMeta(target);
+    const data = meta.getData();
+    if (!data) {
+      const msg = target === 'blocks'
+        ? 'Por favor cargue un modelo de bloques antes de crear variables calculadas.'
+        : target === 'samples'
+        ? 'Por favor cargue muestras metalúrgicas antes de crear variables calculadas.'
+        : 'Por favor cargue sondajes antes de crear variables calculadas.';
+      alert(msg);
+      return;
+    }
+
+    const numericAttrs = meta.getMetadataList(data).filter(a => a.type === 'number');
+    if (numericAttrs.length === 0) {
+      alert('No hay atributos numéricos disponibles en esta capa para usar en una fórmula.');
+      return;
+    }
+
+    const builder = document.getElementById(`calc-builder-${target}`);
+    if (!builder) return;
+
+    builder.classList.remove('hidden');
+    builder.innerHTML = `
+      <div class="settings-group">
+        <label>Nombre de la Variable</label>
+        <input type="text" id="calc-builder-name-${target}" class="form-control" placeholder="ej. CUS.CUT">
+      </div>
+      <div class="settings-group">
+        <label>Fórmula</label>
+        <input type="text" id="calc-builder-formula-${target}" class="form-control" placeholder="ej. [CUS] / [CUT]">
+        <div class="calc-chip-list">
+          ${numericAttrs.map(a => `<button type="button" class="calc-chip-btn" data-attr="${this.escapeHtml(a.name)}">${this.escapeHtml(a.name)}</button>`).join('')}
+        </div>
+        <span class="info-label">Hacé clic en un atributo para insertarlo en la fórmula. Operadores soportados: + − * / ^ y paréntesis.</span>
+      </div>
+      <div id="calc-builder-error-${target}" class="calc-builder-error hidden"></div>
+      <div class="filter-builder-actions">
+        <button class="btn btn-xs btn-primary" id="calc-builder-confirm-${target}">Calcular</button>
+        <button class="btn btn-xs btn-outline" id="calc-builder-cancel-${target}">Cancelar</button>
+      </div>
+    `;
+
+    const formulaInput = document.getElementById(`calc-builder-formula-${target}`);
+    builder.querySelectorAll('.calc-chip-btn').forEach(chip => {
+      chip.addEventListener('click', () => this._insertAtCursor(formulaInput, `[${chip.dataset.attr}]`));
+    });
+
+    document.getElementById(`calc-builder-confirm-${target}`)
+      .addEventListener('click', () => this.confirmCalcBuilder(target));
+    document.getElementById(`calc-builder-cancel-${target}`)
+      .addEventListener('click', () => this.closeCalcBuilder(target));
+  }
+
+  closeCalcBuilder(target) {
+    const builder = document.getElementById(`calc-builder-${target}`);
+    if (builder) {
+      builder.classList.add('hidden');
+      builder.innerHTML = '';
+    }
+  }
+
+  /**
+   * Inserta texto en la posición del cursor de un <input> de texto (usado
+   * por los chips de atributos: clic en un chip -> [Nombre] se inserta donde
+   * estaba el cursor, en vez de siempre al final).
+   */
+  _insertAtCursor(inputEl, text) {
+    if (!inputEl) return;
+    const hasSelection = typeof inputEl.selectionStart === 'number';
+    const start = hasSelection ? inputEl.selectionStart : inputEl.value.length;
+    const end = hasSelection ? inputEl.selectionEnd : inputEl.value.length;
+    inputEl.value = inputEl.value.slice(0, start) + text + inputEl.value.slice(end);
+    inputEl.focus();
+    if (inputEl.setSelectionRange) {
+      const newPos = start + text.length;
+      inputEl.setSelectionRange(newPos, newPos);
+    }
+  }
+
+  /**
+   * Lee el formulario del builder, valida nombre/fórmula/variables
+   * referenciadas, calcula la nueva variable sobre TODOS los registros de la
+   * capa, la registra como un atributo más (attributeMetadata/assayMetadata)
+   * y la selecciona automáticamente como atributo de coloreado activo, para
+   * que quede visible con su leyenda de inmediato — que es, después de todo,
+   * el motivo por el que alguien crearía una variable calculada.
+   */
+  confirmCalcBuilder(target) {
+    const nameInput = document.getElementById(`calc-builder-name-${target}`);
+    const formulaInput = document.getElementById(`calc-builder-formula-${target}`);
+    const errorBox = document.getElementById(`calc-builder-error-${target}`);
+    if (!nameInput || !formulaInput) return;
+
+    const showError = (msg) => {
+      if (errorBox) { errorBox.innerText = msg; errorBox.classList.remove('hidden'); }
+    };
+    if (errorBox) errorBox.classList.add('hidden');
+
+    const name = nameInput.value.trim();
+    const formula = formulaInput.value.trim();
+    if (!name) { showError('Ingresá un nombre para la variable.'); return; }
+    if (!formula) { showError('Ingresá una fórmula.'); return; }
+
+    const meta = this._calcTargetMeta(target);
+    const data = meta.getData();
+    if (!data) { showError('No hay datos cargados en esta capa.'); return; }
+
+    const attrList = meta.getMetadataList(data);
+    const isRedefinition = this.calcVariables[target].some(v => v.name === name);
+    if (attrList.some(a => a.name === name) && !isRedefinition) {
+      showError(`Ya existe un atributo llamado "${name}" en esta capa. Elegí otro nombre.`);
+      return;
+    }
+
+    let ast;
+    try {
+      ast = FormulaEval.parse(formula);
+    } catch (err) {
+      showError(err.message);
+      return;
+    }
+
+    const varNames = Array.from(FormulaEval.collectVarNames(ast));
+    if (varNames.length === 0) {
+      showError('La fórmula debe usar al menos un atributo, ej. [CUT].');
+      return;
+    }
+    const numericNames = new Set(attrList.filter(a => a.type === 'number').map(a => a.name));
+    const missing = varNames.filter(v => !numericNames.has(v));
+    if (missing.length > 0) {
+      showError(`Estos atributos no existen o no son numéricos en esta capa: ${missing.join(', ')}.`);
+      return;
+    }
+
+    const { validCount, totalCount } = meta.compute(data, name, ast);
+
+    const idx = attrList.findIndex(a => a.name === name);
+    if (idx >= 0) attrList[idx] = { name, type: 'number' };
+    else attrList.push({ name, type: 'number' });
+
+    const calcList = this.calcVariables[target];
+    const calcIdx = calcList.findIndex(v => v.name === name);
+    if (calcIdx >= 0) calcList[calcIdx] = { name, formula };
+    else calcList.push({ name, formula });
+
+    this.refreshColorAttributeSelect(target);
+
+    // Auto-seleccionar la variable recién creada como atributo de coloreado activo
+    this[meta.attrKey] = name;
+    const selectEl = document.getElementById(meta.selectId);
+    if (selectEl) selectEl.value = name;
+    this.updateColorRangeUI(target);
+    meta.refresh();
+
+    this.renderCalcPills(target);
+    this.closeCalcBuilder(target);
+
+    this.logConsole('success', `Variable calculada "${name}" creada (${meta.label}): ${validCount.toLocaleString()} de ${totalCount.toLocaleString()} registros con valor válido.`);
+  }
+
+  /**
+   * Elimina una Variable Calculada ya creada: la quita del atributo/metadata
+   * de la capa, y si era el atributo actualmente coloreado la deselecciona
+   * (vuelve a "Ninguno") en vez de dejar la visualización apuntando a un
+   * atributo que ya no existe.
+   */
+  removeCalcVariable(target, name) {
+    const meta = this._calcTargetMeta(target);
+    const data = meta.getData();
+    if (data) {
+      meta.removeAttr(data, name);
+      const attrList = meta.getMetadataList(data);
+      const idx = attrList.findIndex(a => a.name === name);
+      if (idx >= 0) attrList.splice(idx, 1);
+    }
+    this.calcVariables[target] = this.calcVariables[target].filter(v => v.name !== name);
+
+    if (this[meta.attrKey] === name) {
+      this[meta.attrKey] = '';
+      const selectEl = document.getElementById(meta.selectId);
+      if (selectEl) selectEl.value = '';
+      this.updateColorRangeUI(target);
+      meta.refresh();
+    }
+
+    this.refreshColorAttributeSelect(target);
+    this.renderCalcPills(target);
+    this.logConsole('info', `Variable calculada "${name}" eliminada (${meta.label}).`);
+  }
+
+  /**
+   * Reconstruye por completo las opciones del selector "Atributo Activo
+   * (Coloreado)" de una capa a partir de su metadata actual, preservando la
+   * selección previa si ese atributo sigue existiendo. Se usa después de
+   * crear o eliminar una Variable Calculada, para no tener que insertar/quitar
+   * <option> a mano (evita duplicados y desincronización).
+   */
+  refreshColorAttributeSelect(target) {
+    const meta = this._calcTargetMeta(target);
+    const data = meta.getData();
+    const selectEl = document.getElementById(meta.selectId);
+    if (!selectEl || !data) return;
+
+    const prevValue = selectEl.value;
+    const attrs = meta.getMetadataList(data);
+    selectEl.innerHTML = '<option value="">(Ninguno)</option>';
+    attrs.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.innerText = `${a.name} (${a.type === 'category' ? 'Categórico' : 'Numérico'})`;
+      selectEl.appendChild(opt);
+    });
+    if (attrs.some(a => a.name === prevValue)) selectEl.value = prevValue;
+  }
+
+  /**
+   * Dibuja la lista de "pills" de Variables Calculadas ya creadas para una
+   * capa (nombre + fórmula + botón para eliminarla). Usa addEventListener en
+   * vez de onclick inline (a diferencia de renderFilterPills) porque el
+   * nombre/fórmula los escribe el usuario y puede contener comillas u otros
+   * caracteres que romperían un atributo onclick="..." armado por
+   * concatenación de strings.
+   */
+  renderCalcPills(target) {
+    const container = document.getElementById(`active-calc-list-${target}`);
+    if (!container) return;
+
+    const list = this.calcVariables[target];
+    container.innerHTML = '';
+
+    if (list.length === 0) {
+      container.innerHTML = '<div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>';
+      return;
+    }
+
+    list.forEach(v => {
+      const pill = document.createElement('div');
+      pill.className = 'filter-pill';
+      pill.innerHTML = `
+        <span class="pill-text"><strong>${this.escapeHtml(v.name)}</strong> <span class="pill-formula">= ${this.escapeHtml(v.formula)}</span></span>
+        <button class="btn-icon" style="color:var(--accent-red)">×</button>
+      `;
+      pill.querySelector('button').addEventListener('click', () => this.removeCalcVariable(target, v.name));
       container.appendChild(pill);
     });
   }

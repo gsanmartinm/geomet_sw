@@ -582,6 +582,42 @@
                 <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
               </div>
             </div>
+
+            <!-- Variables Calculadas — Modelo de Bloques -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Variables Calculadas — Bloques</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-calc-blocks">+ Nueva Variable</button>
+              </div>
+              <div id="calc-builder-blocks" class="filter-builder hidden"></div>
+              <div id="active-calc-list-blocks" class="filters-container">
+                <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados (ej. CUS / CUT).</div>
+              </div>
+            </div>
+
+            <!-- Variables Calculadas — Sondajes -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Variables Calculadas — Sondajes</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-calc-drillholes">+ Nueva Variable</button>
+              </div>
+              <div id="calc-builder-drillholes" class="filter-builder hidden"></div>
+              <div id="active-calc-list-drillholes" class="filters-container">
+                <div class="empty-notice">No hay variables calculadas. Creá una en función de los ensayos numéricos ya cargados.</div>
+              </div>
+            </div>
+
+            <!-- Variables Calculadas — Muestras Metalúrgicas -->
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Variables Calculadas — Muestras</span>
+                <button class="btn btn-xs btn-outline" id="btn-add-calc-samples">+ Nueva Variable</button>
+              </div>
+              <div id="calc-builder-samples" class="filter-builder hidden"></div>
+              <div id="active-calc-list-samples" class="filters-container">
+                <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>
+              </div>
+            </div>
           </div>
         </div>
       </aside>
@@ -729,6 +765,7 @@
   <!-- Scripts del Prototipo GeoMet -->
   <script src="js/presets.js"></script>
   <script src="js/octree.js"></script>
+  <script src="js/formula-eval.js"></script>
   <!-- dxf-parser.js ya no se carga aquí: el parseo de DXF corre dentro del
        Web Worker (worker-parser.js lo importa vía importScripts), no en el
        hilo principal — ver runDXFImport() en importer.js. -->
