@@ -158,6 +158,14 @@ class GeometScene {
     // llamada a updateLegend() — ver ese método y setLegendVisible().
     this.legendVisible = { blocks: true, drillholes: true, samples: true };
     this._lastLegendParams = {}; // últimos parámetros de cada leyenda, para poder re-renderizarla al reactivarla sin depender de un nuevo render de datos
+
+    // Colores manuales por CATEGORÍA (litología, tipo de sondaje, etc.),
+    // independientes por capa y por atributo: categoryColorOverrides[target][attrName][catName] -> color hex.
+    // Se indexan por NOMBRE de categoría (no por posición en la lista de
+    // categorías detectadas), para que sobrevivan aunque el orden cambie
+    // entre refrescos de datos. Ver getDiscreteColor() y
+    // app.renderCategoryColorPicker().
+    this.categoryColorOverrides = { blocks: {}, drillholes: {}, samples: {} };
     // Estilo POR CAPA de las superficies DXF: cada capa (layerName -> {color,
     // opacity}) mantiene su propio color/opacidad en vez de compartir un único
     // valor global — así se pueden distinguir visualmente varias superficies
@@ -802,7 +810,28 @@ class GeometScene {
     }
   }
 
-  getDiscreteColor(classId) {
+  /**
+   * Color de una categoría discreta (litología, tipo de sondaje, etc.).
+   * Si el usuario definió manualmente un color para esta categoría (ver
+   * this.categoryColorOverrides, editable desde el panel Visualización), se
+   * usa ese; si no, cae al color por defecto de la paleta fija de 10 colores
+   * asignado por posición (classId % 10) — comportamiento idéntico al de
+   * antes de que existiera esta función para quien no la personalice.
+   *
+   * @param {number} classId Índice de la categoría dentro de `lookupTable`.
+   * @param {string} [target] 'blocks' | 'drillholes' | 'samples' — necesario junto con attrName/lookupTable para poder buscar un override.
+   * @param {string} [attrName] Nombre del atributo categórico activo.
+   * @param {string[]} [lookupTable] Lista de nombres de categoría (mismo orden que los índices classId).
+   */
+  getDiscreteColor(classId, target, attrName, lookupTable) {
+    if (target && attrName && lookupTable && this.categoryColorOverrides[target]) {
+      const catName = lookupTable[classId];
+      const overridesForAttr = this.categoryColorOverrides[target][attrName];
+      if (overridesForAttr && catName !== undefined && overridesForAttr[catName] !== undefined) {
+        return new THREE.Color(overridesForAttr[catName]);
+      }
+    }
+
     const colors = [
       0x06b6d4, // cian
       0xf59e0b, // ambar
@@ -926,12 +955,12 @@ class GeometScene {
         if (attrBuffer) {
           const val = attrBuffer[idx];
           if (isCategorical) {
-            col = this.getDiscreteColor(val);
+            col = this.getDiscreteColor(val, 'blocks', activeAttribute, lookupTable);
           } else {
             col = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
         }
-        
+
         pointColors[i * 3] = col.r;
         pointColors[i * 3 + 1] = col.g;
         pointColors[i * 3 + 2] = col.b;
@@ -988,7 +1017,7 @@ class GeometScene {
         if (attrBuffer) {
           const val = attrBuffer[idx];
           if (isCategorical) {
-            c = this.getDiscreteColor(val);
+            c = this.getDiscreteColor(val, 'blocks', activeAttribute, lookupTable);
           } else {
             c = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
@@ -1287,7 +1316,7 @@ class GeometScene {
         if (val !== undefined && val !== null) {
           if (isCategorical) {
             const catId = lookupTable.indexOf(val);
-            c = this.getDiscreteColor(catId);
+            c = this.getDiscreteColor(catId, 'drillholes', activeAttribute, lookupTable);
           } else {
             c = this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
           }
@@ -1412,7 +1441,7 @@ class GeometScene {
       let col = new THREE.Color(0xf59e0b);
       if (attrBuffer) {
         const val = attrBuffer[idx];
-        col = isCategorical ? this.getDiscreteColor(val) : this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
+        col = isCategorical ? this.getDiscreteColor(val, 'samples', activeAttribute, lookupTable) : this.getColorForValue(val, minVal, maxVal, paletteName, customColors);
       }
 
       pointColors[i * 3] = col.r;
@@ -1832,7 +1861,7 @@ class GeometScene {
     if (attrMeta.type === 'category') {
       // Leyenda discreta
       lookupTable.forEach((catName, id) => {
-        const col = this.getDiscreteColor(id);
+        const col = this.getDiscreteColor(id, target, attrMeta.name, lookupTable);
         const hex = `#${col.getHexString()}`;
 
         const row = document.createElement('div');

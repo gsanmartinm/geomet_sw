@@ -1038,9 +1038,11 @@ class GeometApp {
     const infoLabel = document.getElementById(`color-range-info-${target}`);
     const minInput = document.getElementById(`input-color-min-${target}`);
     const maxInput = document.getElementById(`input-color-max-${target}`);
+    const groupCatColors = document.getElementById(`group-category-colors-${target}`);
 
     if (!activeAttribute) {
       if (groupRange) groupRange.classList.add('hidden');
+      if (groupCatColors) groupCatColors.classList.add('hidden');
       return;
     }
 
@@ -1055,6 +1057,7 @@ class GeometApp {
 
     if (isNumeric) {
       if (groupRange) groupRange.classList.remove('hidden');
+      if (groupCatColors) groupCatColors.classList.add('hidden');
       if (range) {
         infoLabel.innerText = `Rango detectado: [${range.min.toFixed(2)} - ${range.max.toFixed(2)}]`;
         minInput.placeholder = range.min.toFixed(2);
@@ -1067,7 +1070,77 @@ class GeometApp {
       this.updateColorRangePreviewBar(target);
     } else {
       if (groupRange) groupRange.classList.add('hidden');
+      if (groupCatColors) {
+        groupCatColors.classList.remove('hidden');
+        this.renderCategoryColorPicker(target, activeAttribute);
+      }
     }
+  }
+
+  /**
+   * Dibuja, para el atributo categórico activo de la capa indicada, una fila
+   * por cada categoría detectada con un selector de color y un botón para
+   * restablecer el color por defecto. Los colores elegidos se guardan en
+   * scene.categoryColorOverrides[target][attrName], indexados por NOMBRE de
+   * categoría (no por índice), para que sobrevivan a reordenamientos.
+   */
+  renderCategoryColorPicker(target, attrName) {
+    const container = document.getElementById(`category-colors-list-${target}`);
+    if (!container) return;
+
+    const lookup = this.getCategoryLookup(target, attrName);
+    container.innerHTML = '';
+
+    if (lookup.length === 0) {
+      container.innerHTML = '<div class="empty-notice">Sin categorías detectadas.</div>';
+      return;
+    }
+
+    const refresh = target === 'blocks' ? () => this.triggerBlockRefresh()
+      : target === 'samples' ? () => this.triggerSamplesRefresh()
+      : () => this.triggerDrillholeRefresh();
+
+    if (!this.scene.categoryColorOverrides[target][attrName]) {
+      this.scene.categoryColorOverrides[target][attrName] = {};
+    }
+    const overrides = this.scene.categoryColorOverrides[target][attrName];
+
+    lookup.forEach((catName, id) => {
+      const row = document.createElement('div');
+      row.className = 'category-color-row';
+
+      const currentColor = this.scene.getDiscreteColor(id, target, attrName, lookup);
+      const hex = '#' + currentColor.getHexString();
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'cat-name';
+      nameSpan.innerText = catName;
+      nameSpan.title = catName;
+
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.value = hex;
+      colorInput.addEventListener('input', (e) => {
+        const hexInt = parseInt(e.target.value.replace('#', '0x'), 16);
+        overrides[catName] = hexInt;
+        refresh();
+      });
+
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'category-color-reset-btn';
+      resetBtn.innerText = '↺';
+      resetBtn.title = 'Restablecer color por defecto';
+      resetBtn.addEventListener('click', () => {
+        delete overrides[catName];
+        colorInput.value = '#' + this.scene.getDiscreteColor(id, target, attrName, lookup).getHexString();
+        refresh();
+      });
+
+      row.appendChild(nameSpan);
+      row.appendChild(colorInput);
+      row.appendChild(resetBtn);
+      container.appendChild(row);
+    });
   }
 
   updateColorRangePreviewBar(target) {
@@ -1203,6 +1276,7 @@ class GeometApp {
           // no tiene sentido conservarlas.
           this.calcVariables.blocks = [];
           this.renderCalcPills('blocks');
+          this.scene.categoryColorOverrides.blocks = {};
         },
         statusId: 'status-blocks',
         selectId: 'select-color-attribute-blocks',
@@ -1219,6 +1293,7 @@ class GeometApp {
           this.renderFilterPills('drillholes');
           this.calcVariables.drillholes = [];
           this.renderCalcPills('drillholes');
+          this.scene.categoryColorOverrides.drillholes = {};
         },
         statusId: 'status-drillholes',
         selectId: 'select-color-attribute-drillholes',
@@ -1234,6 +1309,7 @@ class GeometApp {
           this.renderFilterPills('samples');
           this.calcVariables.samples = [];
           this.renderCalcPills('samples');
+          this.scene.categoryColorOverrides.samples = {};
         },
         statusId: 'status-samples',
         selectId: 'select-color-attribute-samples',
