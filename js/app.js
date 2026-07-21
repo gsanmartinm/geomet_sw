@@ -564,12 +564,12 @@ class GeometApp {
 
     if (this.drillPlannerPicking) {
       if (btn) { btn.innerText = 'Cancelar (esperando click en el visor)'; btn.style.background = 'var(--accent-red)'; }
-      if (info) info.innerText = 'Modo activo: hacé click en el visor 3D para ubicar el collar. Volvé a apretar este botón para cancelar.';
+      if (info) info.innerText = 'Modo activo: haga clic en el visor 3D para ubicar el collar. Vuelva a presionar este botón para cancelar.';
       if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = 'crosshair';
       if (badge) badge.classList.remove('hidden');
     } else {
       if (btn) { btn.innerText = 'Click para Definir Collar'; btn.style.background = ''; }
-      if (info) info.innerText = 'Hacé click en el visor 3D (funciona en Planta o en una Sección de Modo Vista) para ubicar el collar. Si hay una superficie DXF cargada (ej. topografía), el collar se ajusta automáticamente a ella.';
+      if (info) info.innerText = 'Haga clic en el visor 3D (funciona en Planta o en una Sección de Modo Vista) para ubicar el collar. Si hay una superficie DXF cargada (ej. topografía), el collar se ajusta automáticamente a ella.';
       if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = '';
       if (badge) badge.classList.add('hidden');
     }
@@ -602,8 +602,8 @@ class GeometApp {
       }
       collar = this.scene.pickOnHorizontalPlaneAtNDC(ndcX, ndcY, referenceZ);
       if (collar) {
-        this.logConsole('warn', 'Planificador: no se encontró una superficie DXF donde apoyar el collar. Se ubicó en un plano de referencia — ajustá la cota Z manualmente si hace falta.');
-        this.showToast('warn', 'No hay una superficie DXF donde apoyar el collar — se usó un plano de referencia. Ajustá Z a mano si hace falta.');
+        this.logConsole('warn', 'Planificador: no se encontró una superficie DXF donde apoyar el collar. Se ubicó en un plano de referencia — ajuste la cota Z manualmente si hace falta.');
+        this.showToast('warn', 'No hay una superficie DXF donde apoyar el collar — se usó un plano de referencia. Ajuste Z a mano si hace falta.');
       }
     }
 
@@ -711,7 +711,7 @@ class GeometApp {
     container.innerHTML = '';
 
     if (this.drillPlanner.holes.length === 0) {
-      container.innerHTML = '<div class="empty-notice">No hay sondajes propuestos. Definí un collar para empezar.</div>';
+      container.innerHTML = '<div class="empty-notice">No hay sondajes propuestos. Defina un collar para empezar.</div>';
       return;
     }
 
@@ -2440,7 +2440,7 @@ class GeometApp {
         <div class="calc-chip-list">
           ${numericAttrs.map(a => `<button type="button" class="calc-chip-btn" data-attr="${this.escapeHtml(a.name)}">${this.escapeHtml(a.name)}</button>`).join('')}
         </div>
-        <span class="info-label">Hacé clic en un atributo para insertarlo en la fórmula. Operadores soportados: + − * / ^ y paréntesis.</span>
+        <span class="info-label">Haga clic en un atributo para insertarlo en la fórmula. Operadores soportados: + − * / ^ y paréntesis.</span>
       </div>
       <div id="calc-builder-error-${target}" class="calc-builder-error hidden"></div>
       <div class="filter-builder-actions">
@@ -2638,7 +2638,7 @@ class GeometApp {
     container.innerHTML = '';
 
     if (list.length === 0) {
-      container.innerHTML = '<div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>';
+      container.innerHTML = '<div class="empty-notice">No hay variables calculadas. Cree una en función de los atributos numéricos ya cargados.</div>';
       return;
     }
 
@@ -2823,7 +2823,7 @@ class GeometApp {
     container.innerHTML = '';
 
     if (this.savedViews.length === 0) {
-      container.innerHTML = '<div class="empty-notice">No hay vistas guardadas. Configurá el encuadre/etiquetas y guardalas para volver a aplicarlas más tarde.</div>';
+      container.innerHTML = '<div class="empty-notice">No hay vistas guardadas. Configure el encuadre/etiquetas y guárdelas para volver a aplicarlas más tarde.</div>';
       return;
     }
 
@@ -3166,7 +3166,7 @@ class GeometApp {
    */
   exportView() {
     if (!this.scene.viewModeActive) {
-      alert('Activá "Modo Vista" antes de exportar, para bloquear la cámara en un plano/sección válido.');
+      alert('Active "Modo Vista" antes de exportar, para bloquear la cámara en un plano/sección válido.');
       return;
     }
 
