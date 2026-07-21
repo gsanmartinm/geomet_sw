@@ -23,6 +23,16 @@ class GeometScene {
     // apuntar hacia abajo.
     this.camera.up.set(0, 0, 1);
 
+    // Cámara ortográfica alternativa, usada solo por "Modo Vista" (pestaña
+    // Vistas): sin distorsión de perspectiva, como un plano técnico. Se
+    // guarda aparte de this.camera (que sigue siendo la perspectiva libre
+    // por defecto) para poder alternar entre ambas sin reconstruir nada —
+    // ver enterViewMode()/exitViewMode() más abajo.
+    this._perspectiveCamera = this.camera;
+    this._orthoCamera = new THREE.OrthographicCamera(-100, 100, 100, -100, 0.1, 50000);
+    this._orthoCamera.up.set(0, 0, 1);
+    this.viewModeActive = false;
+
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antiAlias: true,
@@ -166,6 +176,22 @@ class GeometScene {
     // entre refrescos de datos. Ver getDiscreteColor() y
     // app.renderCategoryColorPicker().
     this.categoryColorOverrides = { blocks: {}, drillholes: {}, samples: {} };
+
+    // Etiquetas de texto (pestaña Vistas): 1 atributo por capa mostrado como
+    // texto sobre cada elemento visible, solo mientras "Modo Vista" está
+    // activo — ver enterViewMode()/updateLabels(). attribute=null desactiva
+    // las etiquetas de esa capa.
+    this.labelConfig = {
+      blocks: { attribute: null, color: 0xffffff, fontSize: 13 },
+      drillholes: { attribute: null, color: 0xffffff, fontSize: 13 },
+      samples: { attribute: null, color: 0xffffff, fontSize: 13 }
+    };
+    this.labelGroups = { blocks: new THREE.Group(), drillholes: new THREE.Group(), samples: new THREE.Group() };
+    Object.values(this.labelGroups).forEach(g => this.scene.add(g));
+    // Tope de etiquetas por capa: dibujar texto para miles de elementos a la
+    // vez satura visualmente el plano y puede ser lento — ver updateLabels().
+    this.maxLabelsPerTarget = 400;
+
     // Estilo POR CAPA de las superficies DXF: cada capa (layerName -> {color,
     // opacity}) mantiene su propio color/opacidad en vez de compartir un único
     // valor global — así se pueden distinguir visualmente varias superficies
@@ -198,10 +224,22 @@ class GeometScene {
   onWindowResize() {
     this.width = this.canvas.parentElement.clientWidth;
     this.height = this.canvas.parentElement.clientHeight;
-    
-    this.camera.aspect = this.width / this.height;
+
+    if (this.camera.isOrthographicCamera) {
+      // Modo Vista: preservar la altura de encuadre actual (y por lo tanto
+      // el zoom/pan que el usuario ya ajustó) y solo reajustar el ancho a
+      // la nueva proporción del canvas, en vez de re-encuadrar desde cero.
+      const halfH = (this.camera.top - this.camera.bottom) / 2;
+      const aspect = this.width / Math.max(this.height, 1);
+      const halfW = halfH * aspect;
+      const cx = (this.camera.left + this.camera.right) / 2;
+      this.camera.left = cx - halfW;
+      this.camera.right = cx + halfW;
+    } else {
+      this.camera.aspect = this.width / this.height;
+    }
     this.camera.updateProjectionMatrix();
-    
+
     this.renderer.setSize(this.width, this.height);
   }
 
@@ -694,6 +732,256 @@ class GeometScene {
     this.controls.update();
   }
 
+  /**
+   * Activa "Modo Vista" (pestaña Vistas): reemplaza la cámara activa por una
+   * ortográfica (sin distorsión de perspectiva — como un plano técnico de
+   * ingeniería, no como una foto) mirando perpendicular al plano de corte
+   * indicado, encuadrando el bounds de datos cargados con margen y ajustada
+   * a la proporción del canvas (para no ver la escena "estirada"). Reutiliza
+   * la misma convención de ejes que setView()/el filtro de sección: mirar
+   * hacia abajo para Planta (normal Z), hacia el Este para Sección N-S
+   * (normal X), hacia el Norte para Sección E-O (normal Y).
+   *
+   * A diferencia de la cámara libre, OrbitControls queda con enableRotate
+   * en false mientras dure el Modo Vista — solo se puede paniar y hacer
+   * zoom, para encuadrar el sector de interés sin perder el ángulo recto
+   * necesario para un plano/sección válido.
+   *
+   * @param {string} orientation 'horizontal' | 'vertical-n' | 'vertical-e'
+   */
+  enterViewMode(orientation) {
+    const b = this._dataBounds;
+    const target = new THREE.Vector3(0, 0, 0);
+    let dx = 200, dy = 200, dz = 200;
+
+    if (b) {
+      target.set((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2);
+      dx = Math.max(b.maxX - b.minX, 10);
+      dy = Math.max(b.maxY - b.minY, 10);
+      dz = Math.max(b.maxZ - b.minZ, 10);
+    }
+
+    // Extensión horizontal/vertical EN PANTALLA según qué par de ejes queda
+    // visible con esta orientación (ver comentario de setView() más arriba
+    // para la convención completa de hacia dónde mira cada una).
+    let halfW, halfH;
+    const cam = this._orthoCamera;
+    const maxDim = Math.max(dx, dy, dz);
+    const dist = maxDim * 3;
+
+    if (orientation === 'vertical-n') {
+      // Sección N-S (normal X): mirando hacia el Este -> pantalla = (Y, Z)
+      halfW = dy / 2; halfH = dz / 2;
+      cam.position.set(target.x - dist, target.y, target.z);
+      cam.up.set(0, 0, 1);
+    } else if (orientation === 'vertical-e') {
+      // Sección E-O (normal Y): mirando hacia el Norte -> pantalla = (X, Z)
+      halfW = dx / 2; halfH = dz / 2;
+      cam.position.set(target.x, target.y - dist, target.z);
+      cam.up.set(0, 0, 1);
+    } else {
+      // Planta (normal Z): mirando hacia abajo -> pantalla = (X, Y)
+      halfW = dx / 2; halfH = dy / 2;
+      cam.position.set(target.x, target.y, target.z + dist);
+      cam.up.set(0, 1, 0);
+    }
+
+    // Margen del 15% y ajuste a la proporción real del canvas, para que el
+    // encuadre inicial muestre todo el bounds sin quedar estirado.
+    halfW *= 1.15;
+    halfH *= 1.15;
+    const aspect = this.width / Math.max(this.height, 1);
+    if (halfW / Math.max(halfH, 0.001) > aspect) {
+      halfH = halfW / aspect;
+    } else {
+      halfW = halfH * aspect;
+    }
+
+    cam.left = -halfW;
+    cam.right = halfW;
+    cam.top = halfH;
+    cam.bottom = -halfH;
+    cam.near = 0.1;
+    cam.far = dist * 4;
+    cam.zoom = 1;
+    cam.lookAt(target);
+    cam.updateProjectionMatrix();
+
+    this.camera = cam;
+    this.controls.object = cam;
+    this.controls.target.copy(target);
+    this.controls.enableRotate = false;
+    this.controls.update();
+
+    this.viewModeActive = true;
+    this.viewModeOrientation = orientation;
+  }
+
+  /**
+   * Sale de "Modo Vista": vuelve a la cámara en perspectiva libre (orbit
+   * completo), tal como estaba antes de activar el modo.
+   */
+  exitViewMode() {
+    this.camera = this._perspectiveCamera;
+    this.controls.object = this._perspectiveCamera;
+    this.controls.enableRotate = true;
+    this.controls.update();
+    this.viewModeActive = false;
+
+    // Las etiquetas de texto son exclusivas de Modo Vista (ver
+    // updateLabels()) — se limpian al salir para no dejar sprites
+    // "fantasma" corriendo en la exploración 3D libre.
+    ['blocks', 'drillholes', 'samples'].forEach(t => this.updateLabels(t));
+  }
+
+  /**
+   * Dibuja un texto como sprite (canvas-texture) — usado por updateLabels()
+   * para las etiquetas de valor de la pestaña Vistas. depthTest:false para
+   * que el texto siempre quede legible por encima de bloques/superficies,
+   * como una anotación de plano y no como un objeto más de la escena 3D.
+   */
+  _createLabelSprite(text, colorHex, fontSizePx) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const padding = 4;
+
+    ctx.font = `600 ${fontSizePx}px sans-serif`;
+    const measured = ctx.measureText(text);
+    const textWidth = Math.max(1, Math.ceil(measured.width) + padding * 2);
+    const textHeight = Math.max(1, Math.ceil(fontSizePx * 1.4) + padding * 2);
+
+    canvas.width = textWidth * dpr;
+    canvas.height = textHeight * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.font = `600 ${fontSizePx}px sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+
+    // Contorno oscuro para que el texto se lea sobre cualquier color de
+    // fondo (bloques, DXF, fondo oscuro del visor), sin depender de elegir
+    // "el color correcto" a mano.
+    const colorStr = '#' + colorHex.toString(16).padStart(6, '0');
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = Math.max(2, fontSizePx * 0.18);
+    ctx.lineJoin = 'round';
+    ctx.strokeText(text, textWidth / 2, textHeight / 2);
+    ctx.fillStyle = colorStr;
+    ctx.fillText(text, textWidth / 2, textHeight / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true, sizeAttenuation: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.renderOrder = 999;
+
+    // Escalar el sprite en unidades de mundo para que el texto se vea a
+    // ~fontSizePx de alto en pantalla AL ZOOM ACTUAL de la cámara
+    // ortográfica de Modo Vista. Como esto depende del zoom en el momento
+    // de construir la etiqueta, updateLabels() se vuelve a llamar justo
+    // antes de exportar (ver exportView() en app.js), para garantizar que
+    // el tamaño quede correcto en la imagen final aunque el usuario haya
+    // seguido haciendo zoom después del último refresh.
+    const zoom = this.camera.zoom || 1;
+    const frustumHeight = (this.camera.top - this.camera.bottom) / zoom;
+    const worldPerPixel = frustumHeight / Math.max(this.height, 1);
+    sprite.scale.set(textWidth * worldPerPixel, textHeight * worldPerPixel, 1);
+
+    return sprite;
+  }
+
+  _formatLabelNumber(val) {
+    if (typeof val !== 'number' || isNaN(val)) return String(val);
+    return Number.isInteger(val) ? String(val) : val.toFixed(2);
+  }
+
+  /**
+   * (Re)construye las etiquetas de texto de una capa (Bloques/Sondajes/
+   * Muestras) para la pestaña Vistas: un sprite de texto por elemento
+   * VISIBLE actualmente (mismo criterio de filtros/corte que su render
+   * normal — ver getFilteredBlockIndices()/getFilteredDrillholeIntervals()/
+   * getFilteredSampleIndices()), mostrando el valor de this.labelConfig[target].attribute.
+   * Solo se construyen mientras Modo Vista está activo (ver
+   * enterViewMode()) — son una anotación para la vista de planta/sección a
+   * exportar, no para la exploración libre en 3D.
+   * @returns {{count:number, truncated:boolean}}
+   */
+  updateLabels(target) {
+    const group = this.labelGroups[target];
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      group.remove(child);
+      if (child.material.map) child.material.map.dispose();
+      child.material.dispose();
+    }
+
+    const cfg = this.labelConfig[target];
+    if (!this.viewModeActive || !cfg || !cfg.attribute) {
+      return { count: 0, truncated: false };
+    }
+
+    let items = []; // { pos: THREE.Vector3, text: string }
+
+    if (target === 'blocks' && this.blockData) {
+      const indices = this.getFilteredBlockIndices();
+      const meta = this.blockData.attributeMetadata.find(a => a.name === cfg.attribute);
+      const isCategorical = !!meta && meta.type === 'category';
+      const lookup = isCategorical ? (this.blockData.categoryLookups[cfg.attribute] || []) : null;
+      const buf = this.blockData.attributes[cfg.attribute];
+      const positions = this.blockData.positions;
+      if (buf) {
+        indices.forEach(idx => {
+          const raw = buf[idx];
+          if (raw === -999.0) return;
+          const text = isCategorical ? (lookup[raw] !== undefined ? String(lookup[raw]) : '?') : this._formatLabelNumber(raw);
+          items.push({ pos: new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]), text });
+        });
+      }
+    } else if (target === 'drillholes' && this.drillholeData) {
+      const intervals = this.getFilteredDrillholeIntervals();
+      const meta = this.drillholeData.assayMetadata ? this.drillholeData.assayMetadata.find(m => m.name === cfg.attribute) : null;
+      intervals.forEach(interval => {
+        const raw = interval.values ? interval.values[cfg.attribute] : undefined;
+        if (raw === undefined || raw === null || raw === '') return;
+        const isCategorical = meta ? meta.type === 'category' : (typeof raw === 'string');
+        if (!isCategorical && (typeof raw !== 'number' || isNaN(raw))) return;
+        const text = isCategorical ? String(raw) : this._formatLabelNumber(raw);
+        const midX = (interval.startPos[0] + interval.endPos[0]) / 2;
+        const midY = (interval.startPos[1] + interval.endPos[1]) / 2;
+        const midZ = (interval.startPos[2] + interval.endPos[2]) / 2;
+        items.push({ pos: new THREE.Vector3(midX, midY, midZ), text });
+      });
+    } else if (target === 'samples' && this.samplesData) {
+      const indices = this.getFilteredSampleIndices();
+      const meta = this.samplesData.attributeMetadata.find(a => a.name === cfg.attribute);
+      const isCategorical = !!meta && meta.type === 'category';
+      const lookup = isCategorical ? (this.samplesData.categoryLookups[cfg.attribute] || []) : null;
+      const buf = this.samplesData.attributes[cfg.attribute];
+      const positions = this.samplesData.positions;
+      if (buf) {
+        indices.forEach(idx => {
+          const raw = buf[idx];
+          if (raw === -999.0) return;
+          const text = isCategorical ? (lookup[raw] !== undefined ? String(lookup[raw]) : '?') : this._formatLabelNumber(raw);
+          items.push({ pos: new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]), text });
+        });
+      }
+    }
+
+    const truncated = items.length > this.maxLabelsPerTarget;
+    if (truncated) items = items.slice(0, this.maxLabelsPerTarget);
+
+    items.forEach(item => {
+      const sprite = this._createLabelSprite(item.text, cfg.color, cfg.fontSize);
+      sprite.position.copy(item.pos);
+      group.add(sprite);
+    });
+
+    return { count: items.length, truncated };
+  }
+
   focusOnBounds(bounds) {
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cy = (bounds.minY + bounds.maxY) / 2;
@@ -1041,6 +1329,67 @@ class GeometScene {
   }
 
   /**
+   * Devuelve los intervalos de sondaje que pasan el corte de sección/planta
+   * activo (si hay uno) y los filtros de atributo de Sondajes activos —
+   * exactamente el mismo criterio que usa updateDrillholeRender() para
+   * decidir qué dibujar, reutilizado también por updateLabels() para las
+   * etiquetas de texto de la pestaña Vistas (así nunca hay etiquetas para
+   * intervalos que en realidad están ocultos, o viceversa).
+   */
+  getFilteredDrillholeIntervals() {
+    if (!this.drillholeData || !this.drillholeData.intervals) return [];
+
+    const sectionActive = document.getElementById('chk-section-active').checked;
+    let intervalsToRender = this.drillholeData.intervals;
+
+    if (sectionActive) {
+      const type = document.getElementById('select-section-type').value;
+      const coord = parseFloat(document.getElementById('range-section-pos').value);
+      const thicknessVal = parseFloat(document.getElementById('range-section-thickness-drillholes').value);
+
+      const minVal = coord - thicknessVal;
+      const maxVal = coord + thicknessVal;
+
+      intervalsToRender = intervalsToRender.filter(interval => {
+        // Un intervalo pasa si su centroide aproximado cae en el plano
+        const midZ = (interval.startPos[2] + interval.endPos[2]) / 2;
+        const midY = (interval.startPos[1] + interval.endPos[1]) / 2;
+        const midX = (interval.startPos[0] + interval.endPos[0]) / 2;
+
+        if (type === 'vertical-n') {
+          return midX >= minVal && midX <= maxVal;
+        } else if (type === 'vertical-e') {
+          return midY >= minVal && midY <= maxVal;
+        } else {
+          return midZ >= minVal && midZ <= maxVal;
+        }
+      });
+    }
+
+    // Aplicar filtros por atributo de ensayo (AND entre todos los filtros activos de Sondajes)
+    const activeDhFilters = (typeof app !== 'undefined' && app.dhFilters) ? app.dhFilters : [];
+    if (activeDhFilters.length > 0) {
+      intervalsToRender = intervalsToRender.filter(interval => {
+        for (const filter of activeDhFilters) {
+          const val = interval.values ? interval.values[filter.attribute] : undefined;
+          if (filter.type === 'number') {
+            if (val === undefined || val === null || isNaN(val) || val < filter.min || val > filter.max) {
+              return false;
+            }
+          } else if (filter.type === 'category') {
+            if (val === undefined || val === null || !filter.values.includes(val)) {
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+    }
+
+    return intervalsToRender;
+  }
+
+  /**
    * Ejecuta filtros en base a los criterios activos y el octree
    */
   getFilteredBlockIndices() {
@@ -1144,53 +1493,11 @@ class GeometScene {
       return;
     }
 
-    // Filtrar intervalos según corte espacial (sección)
-    const sectionActive = document.getElementById('chk-section-active').checked;
-    let intervalsToRender = drillholeData.intervals;
-    
-    if (sectionActive) {
-      const type = document.getElementById('select-section-type').value;
-      const coord = parseFloat(document.getElementById('range-section-pos').value);
-      const thicknessVal = parseFloat(document.getElementById('range-section-thickness-drillholes').value);
-
-      const minVal = coord - thicknessVal;
-      const maxVal = coord + thicknessVal;
-      
-      intervalsToRender = drillholeData.intervals.filter(interval => {
-        // Un intervalo pasa si su centroide aproximado cae en el plano
-        const midZ = (interval.startPos[2] + interval.endPos[2]) / 2;
-        const midY = (interval.startPos[1] + interval.endPos[1]) / 2;
-        const midX = (interval.startPos[0] + interval.endPos[0]) / 2;
-        
-        if (type === 'vertical-n') {
-          return midX >= minVal && midX <= maxVal;
-        } else if (type === 'vertical-e') {
-          return midY >= minVal && midY <= maxVal;
-        } else {
-          return midZ >= minVal && midZ <= maxVal;
-        }
-      });
-    }
-
-    // Aplicar filtros por atributo de ensayo (AND entre todos los filtros activos de Sondajes)
-    const activeDhFilters = app.dhFilters || [];
-    if (activeDhFilters.length > 0) {
-      intervalsToRender = intervalsToRender.filter(interval => {
-        for (const filter of activeDhFilters) {
-          const val = interval.values ? interval.values[filter.attribute] : undefined;
-          if (filter.type === 'number') {
-            if (val === undefined || val === null || isNaN(val) || val < filter.min || val > filter.max) {
-              return false;
-            }
-          } else if (filter.type === 'category') {
-            if (val === undefined || val === null || !filter.values.includes(val)) {
-              return false;
-            }
-          }
-        }
-        return true;
-      });
-    }
+    // Filtrar intervalos según corte espacial (sección) + filtros de atributo
+    // (ver getFilteredDrillholeIntervals(), extraído aparte para poder
+    // reutilizar EXACTAMENTE el mismo criterio de "qué está visible" en las
+    // etiquetas de texto de la pestaña Vistas — ver updateLabels()).
+    let intervalsToRender = this.getFilteredDrillholeIntervals();
 
     if (intervalsToRender.length === 0) {
       this.updateLegend('drillholes', null);
@@ -1535,6 +1842,12 @@ class GeometScene {
       this.dxfLayerStyles[layerName] = { color: this.defaultDxfColor, opacity: this.defaultDxfOpacity };
     }
     const style = this.dxfLayerStyles[layerName];
+    // Nombre del archivo DXF de origen de esta capa (para la anotación
+    // "Archivos de Origen" de las Vistas exportadas). Se actualiza en cada
+    // (re)importación de la capa.
+    if (dxfData.sourceFileName) {
+      style.sourceFileName = dxfData.sourceFileName;
+    }
 
     const layerGroup = new THREE.Group();
     layerGroup.name = `dxf_${layerName}`;

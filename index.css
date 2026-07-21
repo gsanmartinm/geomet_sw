@@ -958,6 +958,15 @@ input:checked + .slider:before {
   align-items: center;
   font-size: 0.75rem;
 }
+/* Agrupa 2+ botones de acción de una pill (ej. Aplicar + Eliminar en Vistas
+   Guardadas) para que queden juntos a la derecha, en vez de repartirse por
+   todo el ancho como haría justify-content:space-between con 3 hijos sueltos. */
+.filter-pill .pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .filter-pill .pill-text strong {
   color: var(--accent-amber);
 }

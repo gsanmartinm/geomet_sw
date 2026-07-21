@@ -33,6 +33,18 @@ class GeometApp {
     this.sampleColorAttribute = "";
     this.samplePaletteName = "rainbow";
 
+    // Pestaña Vistas: qué anotaciones incluir en la imagen exportada (panel
+    // dibujado solo en el PNG final, no en el visor 3D en vivo — ver
+    // exportView()). dxfLayerNames controla si la leyenda incluye los
+    // nombres de capas DXF cargadas (no tienen variables numéricas propias).
+    this.viewAnnotations = { sourceFiles: false, filters: false, sectionInfo: true, variablesLegend: true, dxfLayerNames: false };
+    // Vistas guardadas EN MEMORIA de esta sesión (no persisten al recargar
+    // la página, igual que calcVariables/filters): snapshot de cámara +
+    // corte + configuración de etiquetas + anotaciones, para poder volver a
+    // aplicar un encuadre ya armado sin rehacerlo a mano. Ver
+    // saveCurrentView()/applySavedView().
+    this.savedViews = [];
+
     // Web Worker
     this.worker = null;
   }
@@ -254,6 +266,7 @@ class GeometApp {
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
       this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
     });
 
     document.getElementById('select-section-type').addEventListener('change', (e) => {
@@ -262,6 +275,13 @@ class GeometApp {
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
       this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
+      // Cambiar de orientación (Planta/N-S/E-O) con Modo Vista activo requiere
+      // re-encuadrar la cámara ortográfica desde cero: el ángulo recto válido
+      // para la orientación anterior ya no aplica a la nueva.
+      if (this.scene.viewModeActive) {
+        this.scene.enterViewMode(e.target.value);
+      }
     });
 
     // Posición de corte: slider + input numérico sincronizados entre sí,
@@ -275,6 +295,7 @@ class GeometApp {
       this.triggerDrillholeRefresh();
       this.triggerSamplesRefresh();
       this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
     });
 
     if (inputSecPos) {
@@ -292,6 +313,7 @@ class GeometApp {
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
         this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
       };
       inputSecPos.addEventListener('change', commitInputSecPos);
       inputSecPos.addEventListener('keydown', (e) => {
@@ -346,6 +368,7 @@ class GeometApp {
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
         this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
       });
       btnSecNext.addEventListener('click', () => {
         const thickness = parseFloat(rangeSecThickBlocks && rangeSecThickBlocks.value) || 10;
@@ -356,6 +379,7 @@ class GeometApp {
         this.triggerDrillholeRefresh();
         this.triggerSamplesRefresh();
         this.scene.updateDxfSectionClip();
+      this.updateViewModeOrientationSummary();
       });
     }
 
@@ -411,6 +435,72 @@ class GeometApp {
         btnAddCalc.addEventListener('click', () => this.openCalcBuilder(target));
       }
     });
+
+    // ==========================================
+    // PESTAÑA VISTAS (planos/secciones exportables)
+    // ==========================================
+    const chkViewMode = document.getElementById('chk-view-mode-active');
+    if (chkViewMode) {
+      chkViewMode.addEventListener('change', (e) => this.toggleViewMode(e.target.checked));
+    }
+
+    // Etiquetas de texto: 1 atributo + color + tamaño de fuente por capa
+    ['blocks', 'drillholes', 'samples'].forEach(target => {
+      const selectLabelAttr = document.getElementById(`select-label-attribute-${target}`);
+      if (selectLabelAttr) {
+        selectLabelAttr.addEventListener('change', (e) => {
+          this.scene.labelConfig[target].attribute = e.target.value || null;
+          this.scene.updateLabels(target);
+        });
+      }
+      const inputLabelColor = document.getElementById(`input-label-color-${target}`);
+      if (inputLabelColor) {
+        inputLabelColor.addEventListener('input', (e) => {
+          this.scene.labelConfig[target].color = parseInt(e.target.value.replace('#', '0x'), 16);
+          this.scene.updateLabels(target);
+        });
+      }
+      const inputLabelFontSize = document.getElementById(`input-label-fontsize-${target}`);
+      if (inputLabelFontSize) {
+        inputLabelFontSize.addEventListener('change', (e) => {
+          const val = parseFloat(e.target.value);
+          if (!isNaN(val) && val > 0) this.scene.labelConfig[target].fontSize = val;
+          this.scene.updateLabels(target);
+        });
+      }
+    });
+
+    const chkLabelDxfNames = document.getElementById('chk-label-dxf-names');
+    if (chkLabelDxfNames) {
+      chkLabelDxfNames.addEventListener('change', (e) => { this.viewAnnotations.dxfLayerNames = e.target.checked; });
+    }
+
+    // Anotaciones de la exportación (panel dibujado solo en la imagen final)
+    const annotationChecks = {
+      'chk-annot-source-files': 'sourceFiles',
+      'chk-annot-filters': 'filters',
+      'chk-annot-section-info': 'sectionInfo',
+      'chk-annot-variables-legend': 'variablesLegend'
+    };
+    Object.entries(annotationChecks).forEach(([id, key]) => {
+      const chk = document.getElementById(id);
+      if (chk) {
+        // El estado inicial del checkbox (algunos vienen "checked" por defecto
+        // en el HTML) manda sobre el default en JS, para no desincronizar UI/estado.
+        this.viewAnnotations[key] = chk.checked;
+        chk.addEventListener('change', (e) => { this.viewAnnotations[key] = e.target.checked; });
+      }
+    });
+
+    const btnExportView = document.getElementById('btn-export-view');
+    if (btnExportView) {
+      btnExportView.addEventListener('click', () => this.exportView());
+    }
+
+    const btnSaveView = document.getElementById('btn-save-view');
+    if (btnSaveView) {
+      btnSaveView.addEventListener('click', () => this.saveCurrentView());
+    }
   }
 
   /**
@@ -716,6 +806,7 @@ class GeometApp {
 
     // Actualizar UI del rango de colores
     this.updateColorRangeUI('blocks');
+    this.refreshLabelAttributeSelect('blocks');
 
     // 4. Renderizar
     // Calcular bounds con márgenes, fusionando los límites de las otras capas
@@ -837,6 +928,7 @@ class GeometApp {
 
     // Actualizar UI del rango de colores
     this.updateColorRangeUI('drillholes');
+    this.refreshLabelAttributeSelect('drillholes');
 
     this.triggerDrillholeRefresh();
     this.updateLayersTree();
@@ -892,6 +984,7 @@ class GeometApp {
     }
 
     this.updateColorRangeUI('samples');
+    this.refreshLabelAttributeSelect('samples');
 
     // Fusionar bounds con las otras capas ya cargadas (igual patrón que
     // loadBlockData/loadDrillholeData) para que grilla y cámara cubran la
@@ -1179,6 +1272,10 @@ class GeometApp {
       range.max,
       this.scene.blockOpacity
     );
+    // Las etiquetas de texto (pestaña Vistas) dependen del mismo conjunto de
+    // bloques visibles que el render — se regeneran en cada refresh para no
+    // quedar desincronizadas (ej. tras cambiar la sección/filtros).
+    this.scene.updateLabels('blocks');
   }
 
   triggerDrillholeRefresh() {
@@ -1192,6 +1289,7 @@ class GeometApp {
       range.min,
       range.max
     );
+    this.scene.updateLabels('drillholes');
   }
 
   triggerSamplesRefresh() {
@@ -1205,6 +1303,7 @@ class GeometApp {
       range.min,
       range.max
     );
+    this.scene.updateLabels('samples');
   }
 
   updateSectionPosLimits() {
@@ -1277,6 +1376,8 @@ class GeometApp {
           this.calcVariables.blocks = [];
           this.renderCalcPills('blocks');
           this.scene.categoryColorOverrides.blocks = {};
+          this.scene.labelConfig.blocks.attribute = null;
+          this.refreshLabelAttributeSelect('blocks');
         },
         statusId: 'status-blocks',
         selectId: 'select-color-attribute-blocks',
@@ -1294,6 +1395,8 @@ class GeometApp {
           this.calcVariables.drillholes = [];
           this.renderCalcPills('drillholes');
           this.scene.categoryColorOverrides.drillholes = {};
+          this.scene.labelConfig.drillholes.attribute = null;
+          this.refreshLabelAttributeSelect('drillholes');
         },
         statusId: 'status-drillholes',
         selectId: 'select-color-attribute-drillholes',
@@ -1310,6 +1413,8 @@ class GeometApp {
           this.calcVariables.samples = [];
           this.renderCalcPills('samples');
           this.scene.categoryColorOverrides.samples = {};
+          this.scene.labelConfig.samples.attribute = null;
+          this.refreshLabelAttributeSelect('samples');
         },
         statusId: 'status-samples',
         selectId: 'select-color-attribute-samples',
@@ -1324,6 +1429,7 @@ class GeometApp {
     // en Bloques (retorna antes de llegar a esa línea) — se fuerza acá para
     // los 3 casos, por consistencia, sin importar el detalle interno de cada uno.
     this.scene.updateLegend(target, null);
+    this.scene.updateLabels(target);
 
     const statusEl = document.getElementById(cfg.statusId);
     if (statusEl) { statusEl.className = 'badge badge-empty'; statusEl.innerText = 'Vacío'; }
@@ -2121,6 +2227,7 @@ class GeometApp {
     else calcList.push({ name, formula });
 
     this.refreshColorAttributeSelect(target);
+    this.refreshLabelAttributeSelect(target);
 
     // Auto-seleccionar la variable recién creada como atributo de coloreado activo
     this[meta.attrKey] = name;
@@ -2160,7 +2267,15 @@ class GeometApp {
       meta.refresh();
     }
 
+    // Si la variable eliminada era la que se estaba usando como etiqueta de
+    // texto (pestaña Vistas), también se deselecciona ahí.
+    if (this.scene.labelConfig[target].attribute === name) {
+      this.scene.labelConfig[target].attribute = null;
+      this.scene.updateLabels(target);
+    }
+
     this.refreshColorAttributeSelect(target);
+    this.refreshLabelAttributeSelect(target);
     this.renderCalcPills(target);
     this.logConsole('info', `Variable calculada "${name}" eliminada (${meta.label}).`);
   }
@@ -2220,6 +2335,445 @@ class GeometApp {
       pill.querySelector('button').addEventListener('click', () => this.removeCalcVariable(target, v.name));
       container.appendChild(pill);
     });
+  }
+
+  // ==========================================
+  // PESTAÑA VISTAS (planos/secciones exportables)
+  // ==========================================
+  /**
+   * Activa/desactiva "Modo Vista" (cámara ortográfica bloqueada — ver
+   * scene.enterViewMode()/exitViewMode()). Si se activa sin que el corte de
+   * Sección/Planta esté encendido, lo enciende automáticamente: una Vista
+   * sin corte mostraría el modelo completo, no un plano/sección puntual.
+   */
+  toggleViewMode(active) {
+    if (active) {
+      const chkSection = document.getElementById('chk-section-active');
+      if (chkSection && !chkSection.checked) {
+        chkSection.checked = true;
+        chkSection.dispatchEvent(new Event('change'));
+        this.logConsole('info', 'Modo Vista: se activó automáticamente el corte de Sección/Planta (necesario para definir qué se ve en el plano).');
+      }
+      const orientation = document.getElementById('select-section-type').value;
+      this.scene.enterViewMode(orientation);
+    } else {
+      this.scene.exitViewMode();
+    }
+
+    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
+    this.updateViewModeOrientationSummary();
+  }
+
+  /**
+   * Actualiza el texto "Orientación y cota actuales" de la pestaña Vistas,
+   * para no tener que ir a revisar Filtros & Secciones para saber qué
+   * encuadre se está por exportar.
+   */
+  updateViewModeOrientationSummary() {
+    const el = document.getElementById('view-mode-orientation-summary');
+    if (!el) return;
+    const chkSection = document.getElementById('chk-section-active');
+    const sectionActive = !!(chkSection && chkSection.checked);
+    const type = document.getElementById('select-section-type').value;
+    const coord = document.getElementById('range-section-pos').value;
+    const label = type === 'vertical-n' ? 'Sección N-S' : type === 'vertical-e' ? 'Sección E-O' : 'Planta';
+    el.innerText = sectionActive ? `${label}, cota/coordenada ${coord} m` : `${label} (corte inactivo — se ve todo el modelo)`;
+  }
+
+  /**
+   * Repuebla el selector de "atributo a etiquetar" de una capa (pestaña
+   * Vistas) con la misma lista de atributos disponibles para Variables
+   * Calculadas (attributeMetadata/assayMetadata, incluye las ya calculadas),
+   * preservando la selección previa si ese atributo sigue existiendo.
+   */
+  refreshLabelAttributeSelect(target) {
+    const selectEl = document.getElementById(`select-label-attribute-${target}`);
+    if (!selectEl) return;
+    const meta = this._calcTargetMeta(target);
+    const data = meta.getData();
+
+    if (!data) {
+      selectEl.innerHTML = '<option value="">(Ninguno)</option>';
+      selectEl.disabled = true;
+      return;
+    }
+
+    const prevValue = selectEl.value;
+    const attrs = meta.getMetadataList(data);
+    selectEl.innerHTML = '<option value="">(Ninguno)</option>';
+    attrs.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.innerText = `${a.name} (${a.type === 'category' ? 'Categórico' : 'Numérico'})`;
+      selectEl.appendChild(opt);
+    });
+    selectEl.disabled = false;
+    if (attrs.some(a => a.name === prevValue)) {
+      selectEl.value = prevValue;
+    } else {
+      selectEl.value = '';
+    }
+  }
+
+  // ------------------------------------------
+  // Vistas guardadas (memoria de sesión)
+  // ------------------------------------------
+  /**
+   * Guarda un snapshot de la configuración actual de Vistas (cámara/corte,
+   * etiquetas por capa, anotaciones activas) con un nombre elegido por el
+   * usuario, para poder volver a aplicarla más tarde en la misma sesión —
+   * se pierde al recargar la página, igual que Filtros/Variables Calculadas.
+   */
+  saveCurrentView() {
+    const name = prompt('Nombre para esta vista:', `Vista ${this.savedViews.length + 1}`);
+    if (!name) return;
+
+    const cam = this.scene.camera;
+    const snapshot = {
+      name,
+      viewModeActive: this.scene.viewModeActive,
+      camera: this.scene.viewModeActive ? {
+        position: { x: cam.position.x, y: cam.position.y, z: cam.position.z },
+        target: { x: this.scene.controls.target.x, y: this.scene.controls.target.y, z: this.scene.controls.target.z },
+        up: { x: cam.up.x, y: cam.up.y, z: cam.up.z },
+        left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom, zoom: cam.zoom
+      } : null,
+      section: {
+        active: document.getElementById('chk-section-active').checked,
+        type: document.getElementById('select-section-type').value,
+        pos: document.getElementById('range-section-pos').value,
+        thicknessBlocks: document.getElementById('range-section-thickness-blocks').value,
+        thicknessDrillholes: document.getElementById('range-section-thickness-drillholes').value,
+        thicknessDxf: document.getElementById('range-section-thickness-dxf').value
+      },
+      labelConfig: JSON.parse(JSON.stringify(this.scene.labelConfig)),
+      annotations: { ...this.viewAnnotations }
+    };
+
+    this.savedViews.push(snapshot);
+    this.renderSavedViewsList();
+    this.logConsole('success', `Vista "${name}" guardada.`);
+  }
+
+  /**
+   * Reaplica una vista guardada: restaura el corte de sección/planta, la
+   * configuración de etiquetas por capa, las anotaciones, y — si la vista
+   * tenía Modo Vista activo — la cámara ortográfica exacta (posición/zoom),
+   * no solo un reencuadre automático nuevo.
+   */
+  applySavedView(idx) {
+    const snap = this.savedViews[idx];
+    if (!snap) return;
+
+    // 1. Restaurar corte de sección/planta (dispara los listeners existentes
+    // vía dispatchEvent, reutilizando toda la lógica de refresh ya wireada
+    // en initUIEventListeners() en vez de duplicarla acá).
+    const chkSection = document.getElementById('chk-section-active');
+    const selType = document.getElementById('select-section-type');
+    const rangePos = document.getElementById('range-section-pos');
+    const thickBlocks = document.getElementById('range-section-thickness-blocks');
+    const thickDh = document.getElementById('range-section-thickness-drillholes');
+    const thickDxf = document.getElementById('range-section-thickness-dxf');
+
+    chkSection.checked = snap.section.active;
+    chkSection.dispatchEvent(new Event('change'));
+    selType.value = snap.section.type;
+    selType.dispatchEvent(new Event('change'));
+    rangePos.value = snap.section.pos;
+    rangePos.dispatchEvent(new Event('input')); // también sincroniza input-section-pos
+    thickBlocks.value = snap.section.thicknessBlocks;
+    thickBlocks.dispatchEvent(new Event('change'));
+    thickDh.value = snap.section.thicknessDrillholes;
+    thickDh.dispatchEvent(new Event('change'));
+    thickDxf.value = snap.section.thicknessDxf;
+    thickDxf.dispatchEvent(new Event('change'));
+
+    // 2. Restaurar configuración de etiquetas por capa
+    ['blocks', 'drillholes', 'samples'].forEach(target => {
+      const cfg = snap.labelConfig[target];
+      if (!cfg) return;
+      this.scene.labelConfig[target] = { ...cfg };
+      const selectEl = document.getElementById(`select-label-attribute-${target}`);
+      if (selectEl) selectEl.value = cfg.attribute || '';
+      const colorEl = document.getElementById(`input-label-color-${target}`);
+      if (colorEl) colorEl.value = '#' + cfg.color.toString(16).padStart(6, '0');
+      const fontEl = document.getElementById(`input-label-fontsize-${target}`);
+      if (fontEl) fontEl.value = cfg.fontSize;
+    });
+
+    // 3. Restaurar anotaciones
+    this.viewAnnotations = { ...snap.annotations };
+    const annotationChecks = {
+      'chk-annot-source-files': 'sourceFiles',
+      'chk-annot-filters': 'filters',
+      'chk-annot-section-info': 'sectionInfo',
+      'chk-annot-variables-legend': 'variablesLegend'
+    };
+    Object.entries(annotationChecks).forEach(([id, key]) => {
+      const chk = document.getElementById(id);
+      if (chk) chk.checked = !!this.viewAnnotations[key];
+    });
+    const chkDxfNames = document.getElementById('chk-label-dxf-names');
+    if (chkDxfNames) chkDxfNames.checked = !!this.viewAnnotations.dxfLayerNames;
+
+    // 4. Restaurar Modo Vista + cámara exacta guardada (posición/zoom del
+    // usuario, no solo el reencuadre automático al bounds completo).
+    const chkViewMode = document.getElementById('chk-view-mode-active');
+    if (snap.viewModeActive && snap.camera) {
+      if (chkViewMode) chkViewMode.checked = true;
+      this.scene.enterViewMode(snap.section.type);
+      const cam = this.scene.camera;
+      cam.position.set(snap.camera.position.x, snap.camera.position.y, snap.camera.position.z);
+      cam.up.set(snap.camera.up.x, snap.camera.up.y, snap.camera.up.z);
+      cam.left = snap.camera.left; cam.right = snap.camera.right;
+      cam.top = snap.camera.top; cam.bottom = snap.camera.bottom;
+      cam.zoom = snap.camera.zoom;
+      cam.updateProjectionMatrix();
+      this.scene.controls.target.set(snap.camera.target.x, snap.camera.target.y, snap.camera.target.z);
+      cam.lookAt(this.scene.controls.target);
+      this.scene.controls.update();
+    } else {
+      if (chkViewMode) chkViewMode.checked = false;
+      this.scene.exitViewMode();
+    }
+
+    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
+    this.updateViewModeOrientationSummary();
+    this.logConsole('success', `Vista "${snap.name}" aplicada.`);
+  }
+
+  deleteSavedView(idx) {
+    const snap = this.savedViews[idx];
+    if (!snap) return;
+    if (!confirm(`¿Eliminar la vista "${snap.name}"?`)) return;
+    this.savedViews.splice(idx, 1);
+    this.renderSavedViewsList();
+  }
+
+  renderSavedViewsList() {
+    const container = document.getElementById('saved-views-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (this.savedViews.length === 0) {
+      container.innerHTML = '<div class="empty-notice">No hay vistas guardadas. Configurá el encuadre/etiquetas y guardalas para volver a aplicarlas más tarde.</div>';
+      return;
+    }
+
+    this.savedViews.forEach((snap, idx) => {
+      const pill = document.createElement('div');
+      pill.className = 'filter-pill';
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'pill-text';
+      textSpan.innerHTML = `<strong>${this.escapeHtml(snap.name)}</strong>`;
+
+      const actions = document.createElement('div');
+      actions.className = 'pill-actions';
+
+      const btnApply = document.createElement('button');
+      btnApply.className = 'btn btn-xs btn-outline';
+      btnApply.innerText = 'Aplicar';
+      btnApply.addEventListener('click', () => this.applySavedView(idx));
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn-icon';
+      btnDelete.style.color = 'var(--accent-red)';
+      btnDelete.innerText = '×';
+      btnDelete.addEventListener('click', () => this.deleteSavedView(idx));
+
+      actions.appendChild(btnApply);
+      actions.appendChild(btnDelete);
+
+      pill.appendChild(textSpan);
+      pill.appendChild(actions);
+      container.appendChild(pill);
+    });
+  }
+
+  // ------------------------------------------
+  // Exportar Vista (PNG)
+  // ------------------------------------------
+  /**
+   * Arma los bloques de anotación activos (según this.viewAnnotations) como
+   * datos simples ({title, lines:[{text, swatch?}]}) — separado de
+   * _drawAnnotationPanel() para poder calcular el alto del panel antes de
+   * dibujar nada.
+   */
+  _buildExportAnnotations() {
+    const blocks = [];
+
+    if (this.viewAnnotations.sectionInfo) {
+      const sectionActive = document.getElementById('chk-section-active').checked;
+      const type = document.getElementById('select-section-type').value;
+      const coord = document.getElementById('range-section-pos').value;
+      const label = type === 'vertical-n' ? 'Sección N-S' : type === 'vertical-e' ? 'Sección E-O' : 'Planta';
+      blocks.push({
+        title: 'Cota / Sección',
+        lines: [{ text: sectionActive ? `${label} — cota/coordenada ${coord} m` : `${label} (corte inactivo)` }]
+      });
+    }
+
+    if (this.viewAnnotations.variablesLegend) {
+      const lines = [];
+      const targetLabels = { blocks: 'Bloques', drillholes: 'Sondajes', samples: 'Muestras' };
+      ['blocks', 'drillholes', 'samples'].forEach(target => {
+        const cfg = this.scene.labelConfig[target];
+        if (cfg && cfg.attribute) {
+          lines.push({ text: `${targetLabels[target]}: ${cfg.attribute}`, swatch: '#' + cfg.color.toString(16).padStart(6, '0') });
+        }
+      });
+      if (this.viewAnnotations.dxfLayerNames) {
+        Object.keys(this.scene.dxfMeshes || {}).forEach(name => {
+          const style = this.scene.dxfLayerStyles[name];
+          const swatch = style ? '#' + style.color.toString(16).padStart(6, '0') : '#475569';
+          lines.push({ text: `DXF: ${name}`, swatch });
+        });
+      }
+      if (lines.length > 0) {
+        blocks.push({ title: 'Leyenda de Variables', lines });
+      }
+    }
+
+    if (this.viewAnnotations.filters) {
+      const lines = [];
+      const filterGroups = [
+        { label: 'Bloques', list: this.filters },
+        { label: 'Sondajes', list: this.dhFilters },
+        { label: 'Muestras', list: this.sampleFilters }
+      ];
+      filterGroups.forEach(g => {
+        (g.list || []).forEach(f => {
+          const text = f.type === 'number'
+            ? `${g.label} — ${f.attribute}: [${f.min} - ${f.max}]`
+            : `${g.label} — ${f.attribute}: {${(f.lookupNames || f.values).join(', ')}}`;
+          lines.push({ text });
+        });
+      });
+      blocks.push({ title: 'Filtros Aplicados', lines: lines.length > 0 ? lines : [{ text: 'Sin filtros activos.' }] });
+    }
+
+    if (this.viewAnnotations.sourceFiles) {
+      const lines = [];
+      if (this.blockData && this.blockData.sourceFileName) lines.push({ text: `Bloques: ${this.blockData.sourceFileName}` });
+      if (this.drillholeData && this.drillholeData.sourceFileNames) {
+        const sf = this.drillholeData.sourceFileNames;
+        const parts = ['collar', 'survey', 'assays', 'geology'].filter(k => sf[k]).map(k => sf[k]);
+        if (parts.length > 0) lines.push({ text: `Sondajes: ${parts.join(', ')}` });
+      }
+      if (this.samplesData && this.samplesData.sourceFileName) lines.push({ text: `Muestras: ${this.samplesData.sourceFileName}` });
+      Object.keys(this.scene.dxfMeshes || {}).forEach(name => {
+        const style = this.scene.dxfLayerStyles[name];
+        if (style && style.sourceFileName) lines.push({ text: `DXF (${name}): ${style.sourceFileName}` });
+      });
+      blocks.push({ title: 'Archivos de Origen', lines: lines.length > 0 ? lines : [{ text: 'Sin archivos de origen registrados.' }] });
+    }
+
+    return blocks;
+  }
+
+  /**
+   * Calcula el alto (en píxeles del canvas exportado, ya multiplicados por
+   * dpr) que va a ocupar el panel de anotaciones — debe usar EXACTAMENTE
+   * las mismas constantes que _drawAnnotationPanel() para no cortar texto.
+   */
+  _estimateAnnotationPanelHeight(blocks, dpr) {
+    if (blocks.length === 0) return 0;
+    const pad = 16 * dpr, lineHeight = 18 * dpr, titleHeight = 20 * dpr, blockGap = 10 * dpr;
+    let height = pad;
+    blocks.forEach(block => {
+      height += titleHeight + block.lines.length * lineHeight + blockGap;
+    });
+    height += pad; // margen inferior (generoso: absorbe el último blockGap sin recortar texto)
+    return Math.ceil(height);
+  }
+
+  _drawAnnotationPanel(ctx, blocks, x, y, width, height, dpr) {
+    const pad = 16 * dpr, lineHeight = 18 * dpr, titleHeight = 20 * dpr, blockGap = 10 * dpr;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+
+    let cursorY = y + pad;
+    ctx.textBaseline = 'top';
+
+    blocks.forEach(block => {
+      ctx.font = `700 ${Math.round(14 * dpr)}px sans-serif`;
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillText(block.title.toUpperCase(), x + pad, cursorY);
+      cursorY += titleHeight;
+
+      ctx.font = `400 ${Math.round(13 * dpr)}px sans-serif`;
+      block.lines.forEach(line => {
+        if (line.swatch) {
+          const sw = 12 * dpr;
+          ctx.fillStyle = line.swatch;
+          ctx.fillRect(x + pad, cursorY + 3 * dpr, sw, sw);
+          ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+          ctx.strokeRect(x + pad + 0.5, cursorY + 3 * dpr + 0.5, sw - 1, sw - 1);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(line.text, x + pad + sw + 6 * dpr, cursorY);
+        } else {
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(line.text, x + pad, cursorY);
+        }
+        cursorY += lineHeight;
+      });
+      cursorY += blockGap;
+    });
+  }
+
+  /**
+   * Exporta la Vista actual como PNG: recompone en un canvas 2D nuevo la
+   * captura del canvas WebGL (con las etiquetas regeneradas al zoom/encuadre
+   * actual, para que su tamaño quede correcto) + un panel al pie con las
+   * anotaciones activas, y descarga el resultado.
+   */
+  exportView() {
+    if (!this.scene.viewModeActive) {
+      alert('Activá "Modo Vista" antes de exportar, para bloquear la cámara en un plano/sección válido.');
+      return;
+    }
+
+    // Regenerar etiquetas al zoom/encuadre actual: si el usuario solo hizo
+    // pan/zoom desde el último refresh de datos, el tamaño en pantalla
+    // podría haber quedado desactualizado (ver nota en scene._createLabelSprite()).
+    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
+
+    // Forzar un render inmediato para asegurar que el canvas capturado esté al día
+    this.scene.renderer.render(this.scene.scene, this.scene.camera);
+
+    const sourceCanvas = this.scene.renderer.domElement;
+    const dpr = this.scene.renderer.getPixelRatio();
+    const annotations = this._buildExportAnnotations();
+    const panelHeight = this._estimateAnnotationPanelHeight(annotations, dpr);
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = sourceCanvas.width;
+    outCanvas.height = sourceCanvas.height + panelHeight;
+    const ctx = outCanvas.getContext('2d');
+
+    ctx.fillStyle = '#0a0f18';
+    ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+    ctx.drawImage(sourceCanvas, 0, 0);
+
+    if (panelHeight > 0) {
+      this._drawAnnotationPanel(ctx, annotations, 0, sourceCanvas.height, outCanvas.width, panelHeight, dpr);
+    }
+
+    const dataUrl = outCanvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = dataUrl;
+    a.download = `GeoMet_Vista_${ts}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    this.logConsole('success', 'Vista exportada como PNG.');
   }
 
   // ==========================================

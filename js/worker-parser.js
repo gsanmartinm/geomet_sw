@@ -628,7 +628,15 @@ function parseDrillholes(payload) {
       traces,
       intervals,
       assayMetadata,
-      assayCategoryLookups
+      assayCategoryLookups,
+      // Nombres de los archivos de origen (Collar/Survey/Assays/Geología),
+      // para poder mostrarlos como anotación en las Vistas exportadas.
+      sourceFileNames: {
+        collar: files.collar ? files.collar.name : null,
+        survey: files.survey ? files.survey.name : null,
+        assays: files.assays ? files.assays.name : null,
+        geology: files.geology ? files.geology.name : null
+      }
     },
     warnings,
     errors
@@ -807,7 +815,8 @@ function parseBlocks(payload) {
       attributes: finalAttributeBuffers,
       categoryLookups,
       bounds: { minX, maxX, minY, maxY, minZ, maxZ },
-      attributeMetadata: mappings.attributes
+      attributeMetadata: mappings.attributes,
+      sourceFileName: file ? file.name : null
     },
     warnings,
     errors
@@ -1080,7 +1089,8 @@ function parseSamples(payload) {
       categoryLookups,
       bounds: { minX, maxX, minY, maxY, minZ, maxZ },
       attributeMetadata: sampleCols,
-      skippedCount
+      skippedCount,
+      sourceFileName: file ? file.name : null
     },
     warnings,
     errors
@@ -1210,7 +1220,7 @@ function parseDxf(payload) {
     transferableList.push(trianglesArr.buffer);
     l.lines.forEach(lineBuf => transferableList.push(lineBuf.buffer));
 
-    layers[name] = { triangles: trianglesArr, lines: l.lines };
+    layers[name] = { triangles: trianglesArr, lines: l.lines, sourceFileName: file.name };
     layerCount++;
     triCount += trianglesArr.length / 9; // 3 vértices * 3 coords
     lineCount += l.lines.length;
