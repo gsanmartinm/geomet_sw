@@ -300,24 +300,26 @@ class GeometApp {
     }
 
     // Espesor de ventana independiente para Modelo de Bloques y Sondajes:
-    // cambiar uno solo refresca su propia capa, no la otra.
+    // cambiar uno solo refresca su propia capa, no la otra. A diferencia de
+    // la Posición de Corte, estos son inputs numéricos simples (sin slider),
+    // así que confirman el valor con 'change' (al perder foco) o Enter, igual
+    // que input-section-pos.
     const rangeSecThickBlocks = document.getElementById('range-section-thickness-blocks');
     if (rangeSecThickBlocks) {
-      rangeSecThickBlocks.addEventListener('input', (e) => {
-        document.getElementById('section-thickness-blocks-val').innerText = `±${e.target.value} m`;
-        this.triggerBlockRefresh();
-      });
+      rangeSecThickBlocks.addEventListener('change', () => this.triggerBlockRefresh());
+      rangeSecThickBlocks.addEventListener('keydown', (e) => { if (e.key === 'Enter') rangeSecThickBlocks.blur(); });
     }
 
     const rangeSecThickDh = document.getElementById('range-section-thickness-drillholes');
     if (rangeSecThickDh) {
-      rangeSecThickDh.addEventListener('input', (e) => {
-        document.getElementById('section-thickness-drillholes-val').innerText = `±${e.target.value} m`;
+      const commitThickDh = () => {
         this.triggerDrillholeRefresh();
         // El mismo control de espesor se reutiliza para filtrar las Muestras
         // Metalúrgicas por sección (ver "Sondajes / Muestras" en la etiqueta).
         this.triggerSamplesRefresh();
-      });
+      };
+      rangeSecThickDh.addEventListener('change', commitThickDh);
+      rangeSecThickDh.addEventListener('keydown', (e) => { if (e.key === 'Enter') rangeSecThickDh.blur(); });
     }
 
     // Espesor de ventana propio para Superficies DXF: a diferencia de
@@ -327,10 +329,8 @@ class GeometApp {
     // porqué de un espesor angosto que muestra el "borde" de nivel/sección.
     const rangeSecThickDxf = document.getElementById('range-section-thickness-dxf');
     if (rangeSecThickDxf) {
-      rangeSecThickDxf.addEventListener('input', (e) => {
-        document.getElementById('section-thickness-dxf-val').innerText = `±${e.target.value} m`;
-        this.scene.updateDxfSectionClip();
-      });
+      rangeSecThickDxf.addEventListener('change', () => this.scene.updateDxfSectionClip());
+      rangeSecThickDxf.addEventListener('keydown', (e) => { if (e.key === 'Enter') rangeSecThickDxf.blur(); });
     }
 
     // Botones de avanzar/retroceder secciones (usan el espesor de Bloques como paso)

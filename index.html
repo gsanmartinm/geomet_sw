@@ -476,166 +476,183 @@
 
           <!-- PESTAÑA FILTROS & SECCIONES -->
           <div id="tab-filters" class="tab-panel">
-            <!-- Sección de Corte (Slicing) -->
-            <div class="filter-section">
-              <div class="filter-section-title">
-                <span>Vistas de Sección / Planta</span>
-                <label class="switch">
-                  <input type="checkbox" id="chk-section-active">
-                  <span class="slider"></span>
-                </label>
-              </div>
-              
-              <div id="section-controls-container" class="disabled-overlay">
-                <div class="settings-group">
-                  <label for="select-section-type">Orientación del Corte</label>
-                  <select id="select-section-type" class="form-control">
-                    <option value="horizontal">Planta (Horizontal, Eje Z)</option>
-                    <option value="vertical-n">Sección N-S (Eje X)</option>
-                    <option value="vertical-e">Sección E-O (Eje Y)</option>
-                  </select>
+
+            <!-- 1. Vistas de Sección / Planta -->
+            <details class="accordion-group" open>
+              <summary class="accordion-header"><span>Vistas de Sección / Planta</span></summary>
+              <div class="accordion-body">
+                <div class="filter-section-title" style="margin-bottom: 0;">
+                  <span>Activar Corte / Sección</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-section-active">
+                    <span class="slider"></span>
+                  </label>
                 </div>
 
+                <div id="section-controls-container" class="disabled-overlay" style="display: flex; flex-direction: column; gap: 16px;">
+                  <div class="settings-group">
+                    <label for="select-section-type">Orientación del Corte</label>
+                    <select id="select-section-type" class="form-control">
+                      <option value="horizontal">Planta (Horizontal, Eje Z)</option>
+                      <option value="vertical-n">Sección N-S (Eje X)</option>
+                      <option value="vertical-e">Sección E-O (Eje Y)</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-group">
+                    <label for="range-section-pos" id="label-section-pos">Posición de Corte (Cota Z)</label>
+                    <div class="range-with-value" style="gap: 6px;">
+                      <button id="btn-sec-prev" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Retroceder Sección">-</button>
+                      <input type="range" id="range-section-pos" min="-1000" max="1000" step="1" value="0" style="flex: 1;">
+                      <button id="btn-sec-next" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Avanzar Sección">+</button>
+                      <span id="section-pos-val" style="width: 55px; text-align: right;">0 m</span>
+                    </div>
+                    <div class="range-with-value" style="gap: 6px; margin-top: 6px;">
+                      <input type="number" id="input-section-pos" class="form-control-sm" step="any" style="flex: 1;" placeholder="Valor exacto...">
+                      <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (valor exacto)</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-group">
+                    <label for="range-section-thickness-blocks">Espesor Ventana — Modelo de Bloques</label>
+                    <div class="range-with-value" style="gap: 6px;">
+                      <input type="number" id="range-section-thickness-blocks" class="form-control-sm" min="0.1" step="any" style="flex: 1;" value="5">
+                      <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (± semi-ancho)</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-group">
+                    <label for="range-section-thickness-drillholes">Espesor Ventana — Sondajes / Muestras</label>
+                    <div class="range-with-value" style="gap: 6px;">
+                      <input type="number" id="range-section-thickness-drillholes" class="form-control-sm" min="0.1" step="any" style="flex: 1;" value="10">
+                      <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (± semi-ancho)</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-group">
+                    <label for="range-section-thickness-dxf">Espesor Ventana — Superficies DXF</label>
+                    <div class="range-with-value" style="gap: 6px;">
+                      <input type="number" id="range-section-thickness-dxf" class="form-control-sm" min="0.1" step="any" style="flex: 1;" value="5">
+                      <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (± semi-ancho)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <!-- 2. Grilla de Referencia -->
+            <details class="accordion-group">
+              <summary class="accordion-header"><span>Grilla de Referencia (Planta / Perfil)</span></summary>
+              <div class="accordion-body">
                 <div class="settings-group">
-                  <label for="range-section-pos" id="label-section-pos">Posición de Corte (Cota Z)</label>
+                  <label for="input-axis-grid-step">Espaciado de Grilla (metros)</label>
                   <div class="range-with-value" style="gap: 6px;">
-                    <button id="btn-sec-prev" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Retroceder Sección">-</button>
-                    <input type="range" id="range-section-pos" min="-1000" max="1000" step="1" value="0" style="flex: 1;">
-                    <button id="btn-sec-next" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-weight: bold; border-color: rgba(255,255,255,0.15);" title="Avanzar Sección">+</button>
-                    <span id="section-pos-val" style="width: 55px; text-align: right;">0 m</span>
+                    <input type="number" id="input-axis-grid-step" class="form-control-sm" step="any" min="0" style="flex: 1;" placeholder="Automático">
+                    <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m entre líneas</span>
                   </div>
-                  <div class="range-with-value" style="gap: 6px; margin-top: 6px;">
-                    <input type="number" id="input-section-pos" class="form-control-sm" step="any" style="flex: 1;" placeholder="Valor exacto...">
-                    <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m (valor exacto)</span>
-                  </div>
+                  <span class="info-label">Deja vacío o en 0 para calcular automáticamente un paso "redondo".</span>
                 </div>
-
                 <div class="settings-group">
-                  <label for="range-section-thickness-blocks">Espesor Ventana — Modelo de Bloques</label>
+                  <label for="range-axis-grid-opacity">Transparencia de la Grilla</label>
                   <div class="range-with-value">
-                    <input type="range" id="range-section-thickness-blocks" min="1" max="100" step="1" value="5">
-                    <span id="section-thickness-blocks-val">±5 m</span>
+                    <input type="range" id="range-axis-grid-opacity" min="0.05" max="1" step="0.05" value="0.45">
+                    <span id="axis-grid-opacity-val">45%</span>
                   </div>
                 </div>
-
                 <div class="settings-group">
-                  <label for="range-section-thickness-drillholes">Espesor Ventana — Sondajes / Muestras</label>
+                  <label for="range-axis-grid-label-size">Tamaño de los Números</label>
                   <div class="range-with-value">
-                    <input type="range" id="range-section-thickness-drillholes" min="1" max="200" step="1" value="10">
-                    <span id="section-thickness-drillholes-val">±10 m</span>
-                  </div>
-                </div>
-
-                <div class="settings-group">
-                  <label for="range-section-thickness-dxf">Espesor Ventana — Superficies DXF</label>
-                  <div class="range-with-value">
-                    <input type="range" id="range-section-thickness-dxf" min="1" max="100" step="1" value="5">
-                    <span id="section-thickness-dxf-val">±5 m</span>
+                    <input type="range" id="range-axis-grid-label-size" min="0.5" max="1.4" step="0.05" value="0.68">
+                    <span id="axis-grid-label-size-val">0.68rem</span>
                   </div>
                 </div>
               </div>
-            </div>
+            </details>
 
-            <!-- Grilla de Referencia (líneas + valores en vistas de Planta/Perfil) -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Grilla de Referencia (Planta / Perfil)</span>
-              </div>
-              <div class="settings-group">
-                <label for="input-axis-grid-step">Espaciado de Grilla (metros)</label>
-                <div class="range-with-value" style="gap: 6px;">
-                  <input type="number" id="input-axis-grid-step" class="form-control-sm" step="any" min="0" style="flex: 1;" placeholder="Automático">
-                  <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">m entre líneas</span>
+            <!-- 3. Filtros -->
+            <details class="accordion-group">
+              <summary class="accordion-header"><span>Filtros</span></summary>
+              <div class="accordion-body">
+                <!-- Filtros de Atributo — Modelo de Bloques -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Modelo de Bloques</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-blocks">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-blocks" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-blocks" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
                 </div>
-                <span class="info-label">Deja vacío o en 0 para calcular automáticamente un paso "redondo".</span>
-              </div>
-              <div class="settings-group">
-                <label for="range-axis-grid-opacity">Transparencia de la Grilla</label>
-                <div class="range-with-value">
-                  <input type="range" id="range-axis-grid-opacity" min="0.05" max="1" step="0.05" value="0.45">
-                  <span id="axis-grid-opacity-val">45%</span>
+
+                <!-- Filtros de Atributo — Sondajes -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Sondajes</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-drillholes">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-drillholes" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-drillholes" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
+                </div>
+
+                <!-- Filtros de Atributo — Muestras Metalúrgicas -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Muestras</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-samples">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-samples" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-samples" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
                 </div>
               </div>
-              <div class="settings-group">
-                <label for="range-axis-grid-label-size">Tamaño de los Números</label>
-                <div class="range-with-value">
-                  <input type="range" id="range-axis-grid-label-size" min="0.5" max="1.4" step="0.05" value="0.68">
-                  <span id="axis-grid-label-size-val">0.68rem</span>
+            </details>
+
+            <!-- 4. Variables Calculadas -->
+            <details class="accordion-group">
+              <summary class="accordion-header"><span>Variables Calculadas</span></summary>
+              <div class="accordion-body">
+                <!-- Variables Calculadas — Modelo de Bloques -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Bloques</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-blocks">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-blocks" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-blocks" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados (ej. CUS / CUT).</div>
+                  </div>
+                </div>
+
+                <!-- Variables Calculadas — Sondajes -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Sondajes</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-drillholes">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-drillholes" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-drillholes" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los ensayos numéricos ya cargados.</div>
+                  </div>
+                </div>
+
+                <!-- Variables Calculadas — Muestras Metalúrgicas -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Muestras</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-samples">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-samples" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-samples" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
 
-            <!-- Filtros de Atributo — Modelo de Bloques -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Filtros — Modelo de Bloques</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-filter-blocks">+ Añadir Filtro</button>
-              </div>
-              <div id="filter-builder-blocks" class="filter-builder hidden"></div>
-              <div id="active-filters-list-blocks" class="filters-container">
-                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-              </div>
-            </div>
-
-            <!-- Filtros de Atributo — Sondajes -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Filtros — Sondajes</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-filter-drillholes">+ Añadir Filtro</button>
-              </div>
-              <div id="filter-builder-drillholes" class="filter-builder hidden"></div>
-              <div id="active-filters-list-drillholes" class="filters-container">
-                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-              </div>
-            </div>
-
-            <!-- Filtros de Atributo — Muestras Metalúrgicas -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Filtros — Muestras</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-filter-samples">+ Añadir Filtro</button>
-              </div>
-              <div id="filter-builder-samples" class="filter-builder hidden"></div>
-              <div id="active-filters-list-samples" class="filters-container">
-                <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-              </div>
-            </div>
-
-            <!-- Variables Calculadas — Modelo de Bloques -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Variables Calculadas — Bloques</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-calc-blocks">+ Nueva Variable</button>
-              </div>
-              <div id="calc-builder-blocks" class="filter-builder hidden"></div>
-              <div id="active-calc-list-blocks" class="filters-container">
-                <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados (ej. CUS / CUT).</div>
-              </div>
-            </div>
-
-            <!-- Variables Calculadas — Sondajes -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Variables Calculadas — Sondajes</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-calc-drillholes">+ Nueva Variable</button>
-              </div>
-              <div id="calc-builder-drillholes" class="filter-builder hidden"></div>
-              <div id="active-calc-list-drillholes" class="filters-container">
-                <div class="empty-notice">No hay variables calculadas. Creá una en función de los ensayos numéricos ya cargados.</div>
-              </div>
-            </div>
-
-            <!-- Variables Calculadas — Muestras Metalúrgicas -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Variables Calculadas — Muestras</span>
-                <button class="btn btn-xs btn-outline" id="btn-add-calc-samples">+ Nueva Variable</button>
-              </div>
-              <div id="calc-builder-samples" class="filter-builder hidden"></div>
-              <div id="active-calc-list-samples" class="filters-container">
-                <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>
-              </div>
-            </div>
           </div>
         </div>
       </aside>

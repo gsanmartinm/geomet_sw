@@ -820,6 +820,65 @@ input:checked + .slider:before {
   background-color: var(--accent-cyan);
 }
 
+/* Acordeón de nivel superior de la pestaña "Filtros & Secciones": agrupa
+   Vistas de Sección/Planta, Grilla de Referencia, Filtros y Variables
+   Calculadas en 4 bloques plegables, para no tener que scrollear por todo
+   de una vez. Implementado con <details>/<summary> nativos (sin JS extra
+   para abrir/cerrar). */
+.accordion-group {
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.accordion-group + .accordion-group {
+  margin-top: 20px;
+}
+.accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  list-style: none;
+  user-select: none;
+}
+.accordion-header::-webkit-details-marker { display: none; }
+.accordion-header::after {
+  content: '▸';
+  color: var(--accent-cyan);
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+.accordion-group[open] > .accordion-header::after {
+  transform: rotate(90deg);
+}
+.accordion-header:hover {
+  color: var(--accent-cyan);
+}
+.accordion-body {
+  padding: 4px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 14px;
+}
+/* El gap del acordeón ya separa los .settings-group entre sí (tanto los
+   directos como los anidados dentro de #section-controls-container), así
+   que se anula su margin-bottom propio para no duplicar el espaciado. */
+.accordion-body .settings-group {
+  margin-bottom: 0;
+}
+
 /* Filter Sections */
 .filter-section {
   background-color: rgba(0, 0, 0, 0.15);
