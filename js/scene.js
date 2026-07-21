@@ -177,21 +177,6 @@ class GeometScene {
     // app.renderCategoryColorPicker().
     this.categoryColorOverrides = { blocks: {}, drillholes: {}, samples: {} };
 
-    // Etiquetas de texto (pestaña Vistas): 1 atributo por capa mostrado como
-    // texto sobre cada elemento visible, solo mientras "Modo Vista" está
-    // activo — ver enterViewMode()/updateLabels(). attribute=null desactiva
-    // las etiquetas de esa capa.
-    this.labelConfig = {
-      blocks: { attribute: null, color: 0xffffff, fontSize: 13 },
-      drillholes: { attribute: null, color: 0xffffff, fontSize: 13 },
-      samples: { attribute: null, color: 0xffffff, fontSize: 13 }
-    };
-    this.labelGroups = { blocks: new THREE.Group(), drillholes: new THREE.Group(), samples: new THREE.Group() };
-    Object.values(this.labelGroups).forEach(g => this.scene.add(g));
-    // Tope de etiquetas por capa: dibujar texto para miles de elementos a la
-    // vez satura visualmente el plano y puede ser lento — ver updateLabels().
-    this.maxLabelsPerTarget = 400;
-
     // Estilo POR CAPA de las superficies DXF: cada capa (layerName -> {color,
     // opacity}) mantiene su propio color/opacidad en vez de compartir un único
     // valor global — así se pueden distinguir visualmente varias superficies
@@ -827,159 +812,88 @@ class GeometScene {
     this.controls.enableRotate = true;
     this.controls.update();
     this.viewModeActive = false;
-
-    // Las etiquetas de texto son exclusivas de Modo Vista (ver
-    // updateLabels()) — se limpian al salir para no dejar sprites
-    // "fantasma" corriendo en la exploración 3D libre.
-    ['blocks', 'drillholes', 'samples'].forEach(t => this.updateLabels(t));
   }
 
   /**
-   * Dibuja un texto como sprite (canvas-texture) — usado por updateLabels()
-   * para las etiquetas de valor de la pestaña Vistas. depthTest:false para
-   * que el texto siempre quede legible por encima de bloques/superficies,
-   * como una anotación de plano y no como un objeto más de la escena 3D.
+   * Dibuja la grilla de referencia (líneas + valores de cota/coordenada)
+   * directamente sobre un contexto Canvas2D — usado por exportView() en
+   * app.js. La grilla normalmente se dibuja como overlay HTML/CSS (ver
+   * _updateAxisRuler()/_projectAxisRulerLabels()/_projectAxisRulerLines()),
+   * así que NO queda incluida en la captura del canvas WebGL
+   * (renderer.domElement es solo lo que dibujó THREE, no el DOM que está
+   * encima). Reproyecta los mismos puntos 3D ya calculados y cacheados en
+   * this._axisRulerLines/_axisRulerLabels con la MISMA fórmula NDC->pantalla
+   * que la versión HTML, así que coincide exactamente con lo que se ve en
+   * vivo en el visor.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} canvasWidthPx  Ancho del canvas de destino, en píxeles reales (device pixels).
+   * @param {number} canvasHeightPx Alto del canvas de destino, en píxeles reales.
+   * @param {number} dpr Relación entre esos píxeles reales y los píxeles CSS del visor en vivo (renderer.getPixelRatio()).
    */
-  _createLabelSprite(text, colorHex, fontSizePx) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const padding = 4;
+  drawAxisRulerToCanvas(ctx, canvasWidthPx, canvasHeightPx, dpr) {
+    if (!this._axisRulerLines.length && !this._axisRulerLabels.length) return;
 
-    ctx.font = `600 ${fontSizePx}px sans-serif`;
-    const measured = ctx.measureText(text);
-    const textWidth = Math.max(1, Math.ceil(measured.width) + padding * 2);
-    const textHeight = Math.max(1, Math.ceil(fontSizePx * 1.4) + padding * 2);
+    const gridColor = 'hsl(140, 40%, 50%)'; // mismo --grid-green del CSS
 
-    canvas.width = textWidth * dpr;
-    canvas.height = textHeight * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.font = `600 ${fontSizePx}px sans-serif`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-
-    // Contorno oscuro para que el texto se lea sobre cualquier color de
-    // fondo (bloques, DXF, fondo oscuro del visor), sin depender de elegir
-    // "el color correcto" a mano.
-    const colorStr = '#' + colorHex.toString(16).padStart(6, '0');
-    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-    ctx.lineWidth = Math.max(2, fontSizePx * 0.18);
-    ctx.lineJoin = 'round';
-    ctx.strokeText(text, textWidth / 2, textHeight / 2);
-    ctx.fillStyle = colorStr;
-    ctx.fillText(text, textWidth / 2, textHeight / 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.needsUpdate = true;
-
-    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true, sizeAttenuation: false });
-    const sprite = new THREE.Sprite(material);
-    sprite.renderOrder = 999;
-
-    // Escalar el sprite en unidades de mundo para que el texto se vea a
-    // ~fontSizePx de alto en pantalla AL ZOOM ACTUAL de la cámara
-    // ortográfica de Modo Vista. Como esto depende del zoom en el momento
-    // de construir la etiqueta, updateLabels() se vuelve a llamar justo
-    // antes de exportar (ver exportView() en app.js), para garantizar que
-    // el tamaño quede correcto en la imagen final aunque el usuario haya
-    // seguido haciendo zoom después del último refresh.
-    const zoom = this.camera.zoom || 1;
-    const frustumHeight = (this.camera.top - this.camera.bottom) / zoom;
-    const worldPerPixel = frustumHeight / Math.max(this.height, 1);
-    sprite.scale.set(textWidth * worldPerPixel, textHeight * worldPerPixel, 1);
-
-    return sprite;
-  }
-
-  _formatLabelNumber(val) {
-    if (typeof val !== 'number' || isNaN(val)) return String(val);
-    return Number.isInteger(val) ? String(val) : val.toFixed(2);
-  }
-
-  /**
-   * (Re)construye las etiquetas de texto de una capa (Bloques/Sondajes/
-   * Muestras) para la pestaña Vistas: un sprite de texto por elemento
-   * VISIBLE actualmente (mismo criterio de filtros/corte que su render
-   * normal — ver getFilteredBlockIndices()/getFilteredDrillholeIntervals()/
-   * getFilteredSampleIndices()), mostrando el valor de this.labelConfig[target].attribute.
-   * Solo se construyen mientras Modo Vista está activo (ver
-   * enterViewMode()) — son una anotación para la vista de planta/sección a
-   * exportar, no para la exploración libre en 3D.
-   * @returns {{count:number, truncated:boolean}}
-   */
-  updateLabels(target) {
-    const group = this.labelGroups[target];
-    while (group.children.length > 0) {
-      const child = group.children[0];
-      group.remove(child);
-      if (child.material.map) child.material.map.dispose();
-      child.material.dispose();
-    }
-
-    const cfg = this.labelConfig[target];
-    if (!this.viewModeActive || !cfg || !cfg.attribute) {
-      return { count: 0, truncated: false };
-    }
-
-    let items = []; // { pos: THREE.Vector3, text: string }
-
-    if (target === 'blocks' && this.blockData) {
-      const indices = this.getFilteredBlockIndices();
-      const meta = this.blockData.attributeMetadata.find(a => a.name === cfg.attribute);
-      const isCategorical = !!meta && meta.type === 'category';
-      const lookup = isCategorical ? (this.blockData.categoryLookups[cfg.attribute] || []) : null;
-      const buf = this.blockData.attributes[cfg.attribute];
-      const positions = this.blockData.positions;
-      if (buf) {
-        indices.forEach(idx => {
-          const raw = buf[idx];
-          if (raw === -999.0) return;
-          const text = isCategorical ? (lookup[raw] !== undefined ? String(lookup[raw]) : '?') : this._formatLabelNumber(raw);
-          items.push({ pos: new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]), text });
-        });
-      }
-    } else if (target === 'drillholes' && this.drillholeData) {
-      const intervals = this.getFilteredDrillholeIntervals();
-      const meta = this.drillholeData.assayMetadata ? this.drillholeData.assayMetadata.find(m => m.name === cfg.attribute) : null;
-      intervals.forEach(interval => {
-        const raw = interval.values ? interval.values[cfg.attribute] : undefined;
-        if (raw === undefined || raw === null || raw === '') return;
-        const isCategorical = meta ? meta.type === 'category' : (typeof raw === 'string');
-        if (!isCategorical && (typeof raw !== 'number' || isNaN(raw))) return;
-        const text = isCategorical ? String(raw) : this._formatLabelNumber(raw);
-        const midX = (interval.startPos[0] + interval.endPos[0]) / 2;
-        const midY = (interval.startPos[1] + interval.endPos[1]) / 2;
-        const midZ = (interval.startPos[2] + interval.endPos[2]) / 2;
-        items.push({ pos: new THREE.Vector3(midX, midY, midZ), text });
-      });
-    } else if (target === 'samples' && this.samplesData) {
-      const indices = this.getFilteredSampleIndices();
-      const meta = this.samplesData.attributeMetadata.find(a => a.name === cfg.attribute);
-      const isCategorical = !!meta && meta.type === 'category';
-      const lookup = isCategorical ? (this.samplesData.categoryLookups[cfg.attribute] || []) : null;
-      const buf = this.samplesData.attributes[cfg.attribute];
-      const positions = this.samplesData.positions;
-      if (buf) {
-        indices.forEach(idx => {
-          const raw = buf[idx];
-          if (raw === -999.0) return;
-          const text = isCategorical ? (lookup[raw] !== undefined ? String(lookup[raw]) : '?') : this._formatLabelNumber(raw);
-          items.push({ pos: new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]), text });
-        });
-      }
-    }
-
-    const truncated = items.length > this.maxLabelsPerTarget;
-    if (truncated) items = items.slice(0, this.maxLabelsPerTarget);
-
-    items.forEach(item => {
-      const sprite = this._createLabelSprite(item.text, cfg.color, cfg.fontSize);
-      sprite.position.copy(item.pos);
-      group.add(sprite);
+    ctx.save();
+    ctx.globalAlpha = this.axisGridOpacity;
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = Math.max(1, dpr);
+    this._axisRulerLines.forEach(item => {
+      const pa = item.pointA.clone().project(this.camera);
+      const pb = item.pointB.clone().project(this.camera);
+      if (pa.z > 1 || pb.z > 1) return;
+      const ax = (pa.x * 0.5 + 0.5) * canvasWidthPx;
+      const ay = (1 - (pa.y * 0.5 + 0.5)) * canvasHeightPx;
+      const bx = (pb.x * 0.5 + 0.5) * canvasWidthPx;
+      const by = (1 - (pb.y * 0.5 + 0.5)) * canvasHeightPx;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
     });
+    ctx.restore();
 
-    return { count: items.length, truncated };
+    // Etiquetas numéricas — mismo halo oscuro que el text-shadow CSS, para
+    // que se lean sobre cualquier fondo (bloques, DXF, vacío).
+    ctx.save();
+    ctx.globalAlpha = 1;
+    const fontPx = Math.max(1, Math.round(this.axisGridLabelSize * 16 * dpr));
+    ctx.font = `500 ${fontPx}px sans-serif`;
+    ctx.lineWidth = Math.max(2, fontPx * 0.15);
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillStyle = gridColor;
+    ctx.textBaseline = 'middle';
+
+    const bottomOffsetPx = 34 * dpr; // ver CSS .axis-ruler-label-bottom { bottom: 34px }
+    const leftOffsetPx = 8 * dpr;    // ver CSS .axis-ruler-label-left { left: 8px }
+
+    this._axisRulerLabels.forEach(item => {
+      const p = item.point.clone().project(this.camera);
+      if (p.z > 1) return;
+      const text = item.div.innerText;
+      if (!text) return;
+
+      if (item.edge === 'bottom') {
+        const screenX = (p.x * 0.5 + 0.5) * canvasWidthPx;
+        if (screenX < -60 * dpr || screenX > canvasWidthPx + 60 * dpr) return;
+        // CSS: rotate(-90deg) anclado 34px arriba del borde inferior.
+        ctx.save();
+        ctx.translate(screenX, canvasHeightPx - bottomOffsetPx);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.strokeText(text, 0, 0);
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
+      } else {
+        const screenY = (1 - (p.y * 0.5 + 0.5)) * canvasHeightPx;
+        if (screenY < -20 * dpr || screenY > canvasHeightPx + 20 * dpr) return;
+        ctx.textAlign = 'left';
+        ctx.strokeText(text, leftOffsetPx, screenY);
+        ctx.fillText(text, leftOffsetPx, screenY);
+      }
+    });
+    ctx.restore();
   }
 
   focusOnBounds(bounds) {
@@ -1332,9 +1246,7 @@ class GeometScene {
    * Devuelve los intervalos de sondaje que pasan el corte de sección/planta
    * activo (si hay uno) y los filtros de atributo de Sondajes activos —
    * exactamente el mismo criterio que usa updateDrillholeRender() para
-   * decidir qué dibujar, reutilizado también por updateLabels() para las
-   * etiquetas de texto de la pestaña Vistas (así nunca hay etiquetas para
-   * intervalos que en realidad están ocultos, o viceversa).
+   * decidir qué dibujar.
    */
   getFilteredDrillholeIntervals() {
     if (!this.drillholeData || !this.drillholeData.intervals) return [];
@@ -1494,9 +1406,7 @@ class GeometScene {
     }
 
     // Filtrar intervalos según corte espacial (sección) + filtros de atributo
-    // (ver getFilteredDrillholeIntervals(), extraído aparte para poder
-    // reutilizar EXACTAMENTE el mismo criterio de "qué está visible" en las
-    // etiquetas de texto de la pestaña Vistas — ver updateLabels()).
+    // (ver getFilteredDrillholeIntervals()).
     let intervalsToRender = this.getFilteredDrillholeIntervals();
 
     if (intervalsToRender.length === 0) {

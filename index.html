@@ -675,57 +675,6 @@
               </div>
             </div>
 
-            <!-- Etiquetas de texto por dataset -->
-            <div class="filter-section mt-4">
-              <div class="filter-section-title">
-                <span>Etiquetas de Texto</span>
-              </div>
-              <span class="info-label" style="margin-bottom: 10px; display: block;">Elige, por cada capa cargada, 1 variable a mostrar como texto sobre cada elemento visible dentro del corte activo (solo visible con Modo Vista activado).</span>
-
-              <div class="settings-group">
-                <label for="select-label-attribute-blocks">Bloques</label>
-                <select id="select-label-attribute-blocks" class="form-control" disabled>
-                  <option value="">(Ninguno)</option>
-                </select>
-                <div class="range-with-value" style="gap: 10px; margin-top: 6px;">
-                  <input type="color" id="input-label-color-blocks" value="#ffffff">
-                  <input type="number" id="input-label-fontsize-blocks" class="form-control-sm" min="6" max="60" step="1" value="13" style="flex: 1;">
-                  <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">px</span>
-                </div>
-              </div>
-
-              <div class="settings-group">
-                <label for="select-label-attribute-drillholes">Sondajes</label>
-                <select id="select-label-attribute-drillholes" class="form-control" disabled>
-                  <option value="">(Ninguno)</option>
-                </select>
-                <div class="range-with-value" style="gap: 10px; margin-top: 6px;">
-                  <input type="color" id="input-label-color-drillholes" value="#ffffff">
-                  <input type="number" id="input-label-fontsize-drillholes" class="form-control-sm" min="6" max="60" step="1" value="13" style="flex: 1;">
-                  <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">px</span>
-                </div>
-              </div>
-
-              <div class="settings-group">
-                <label for="select-label-attribute-samples">Muestras</label>
-                <select id="select-label-attribute-samples" class="form-control" disabled>
-                  <option value="">(Ninguno)</option>
-                </select>
-                <div class="range-with-value" style="gap: 10px; margin-top: 6px;">
-                  <input type="color" id="input-label-color-samples" value="#ffffff">
-                  <input type="number" id="input-label-fontsize-samples" class="form-control-sm" min="6" max="60" step="1" value="13" style="flex: 1;">
-                  <span style="font-size: 0.7rem; color: var(--text-muted); width: auto;">px</span>
-                </div>
-              </div>
-
-              <div class="settings-group" style="margin-bottom: 0;">
-                <label class="filter-cat-item" style="display: flex; align-items: center; gap: 8px;">
-                  <input type="checkbox" id="chk-label-dxf-names">
-                  <span>Incluir nombres de capas DXF en la leyenda</span>
-                </label>
-              </div>
-            </div>
-
             <!-- Anotaciones de la exportación -->
             <div class="filter-section mt-4">
               <div class="filter-section-title">
@@ -735,8 +684,9 @@
               <div class="filters-container">
                 <label class="filter-cat-item"><input type="checkbox" id="chk-annot-source-files"><span>Archivos de origen</span></label>
                 <label class="filter-cat-item"><input type="checkbox" id="chk-annot-filters"><span>Filtros aplicados</span></label>
-                <label class="filter-cat-item"><input type="checkbox" id="chk-annot-section-info" checked><span>Cota / Sección</span></label>
-                <label class="filter-cat-item"><input type="checkbox" id="chk-annot-variables-legend" checked><span>Leyenda de variables mostradas</span></label>
+                <label class="filter-cat-item"><input type="checkbox" id="chk-annot-section-info" checked><span>Cota / Sección (incluye espesores)</span></label>
+                <label class="filter-cat-item"><input type="checkbox" id="chk-annot-variables-legend" checked><span>Leyenda de variables mostradas (atributo activo por capa)</span></label>
+                <label class="filter-cat-item" style="padding-left: 22px;"><input type="checkbox" id="chk-label-dxf-names"><span>Incluir nombres de capas DXF en la leyenda</span></label>
               </div>
             </div>
 

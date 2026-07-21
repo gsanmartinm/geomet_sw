@@ -36,13 +36,12 @@ class GeometApp {
     // Pestaña Vistas: qué anotaciones incluir en la imagen exportada (panel
     // dibujado solo en el PNG final, no en el visor 3D en vivo — ver
     // exportView()). dxfLayerNames controla si la leyenda incluye los
-    // nombres de capas DXF cargadas (no tienen variables numéricas propias).
+    // nombres de capas DXF cargadas (no tienen un atributo de color propio).
     this.viewAnnotations = { sourceFiles: false, filters: false, sectionInfo: true, variablesLegend: true, dxfLayerNames: false };
     // Vistas guardadas EN MEMORIA de esta sesión (no persisten al recargar
-    // la página, igual que calcVariables/filters): snapshot de cámara +
-    // corte + configuración de etiquetas + anotaciones, para poder volver a
-    // aplicar un encuadre ya armado sin rehacerlo a mano. Ver
-    // saveCurrentView()/applySavedView().
+    // la página, igual que calcVariables/filters): snapshot de cámara + corte
+    // + anotaciones activas, para poder volver a aplicar un encuadre ya
+    // armado sin rehacerlo a mano. Ver saveCurrentView()/applySavedView().
     this.savedViews = [];
 
     // Web Worker
@@ -444,32 +443,6 @@ class GeometApp {
       chkViewMode.addEventListener('change', (e) => this.toggleViewMode(e.target.checked));
     }
 
-    // Etiquetas de texto: 1 atributo + color + tamaño de fuente por capa
-    ['blocks', 'drillholes', 'samples'].forEach(target => {
-      const selectLabelAttr = document.getElementById(`select-label-attribute-${target}`);
-      if (selectLabelAttr) {
-        selectLabelAttr.addEventListener('change', (e) => {
-          this.scene.labelConfig[target].attribute = e.target.value || null;
-          this.scene.updateLabels(target);
-        });
-      }
-      const inputLabelColor = document.getElementById(`input-label-color-${target}`);
-      if (inputLabelColor) {
-        inputLabelColor.addEventListener('input', (e) => {
-          this.scene.labelConfig[target].color = parseInt(e.target.value.replace('#', '0x'), 16);
-          this.scene.updateLabels(target);
-        });
-      }
-      const inputLabelFontSize = document.getElementById(`input-label-fontsize-${target}`);
-      if (inputLabelFontSize) {
-        inputLabelFontSize.addEventListener('change', (e) => {
-          const val = parseFloat(e.target.value);
-          if (!isNaN(val) && val > 0) this.scene.labelConfig[target].fontSize = val;
-          this.scene.updateLabels(target);
-        });
-      }
-    });
-
     const chkLabelDxfNames = document.getElementById('chk-label-dxf-names');
     if (chkLabelDxfNames) {
       chkLabelDxfNames.addEventListener('change', (e) => { this.viewAnnotations.dxfLayerNames = e.target.checked; });
@@ -806,7 +779,6 @@ class GeometApp {
 
     // Actualizar UI del rango de colores
     this.updateColorRangeUI('blocks');
-    this.refreshLabelAttributeSelect('blocks');
 
     // 4. Renderizar
     // Calcular bounds con márgenes, fusionando los límites de las otras capas
@@ -928,7 +900,6 @@ class GeometApp {
 
     // Actualizar UI del rango de colores
     this.updateColorRangeUI('drillholes');
-    this.refreshLabelAttributeSelect('drillholes');
 
     this.triggerDrillholeRefresh();
     this.updateLayersTree();
@@ -984,7 +955,6 @@ class GeometApp {
     }
 
     this.updateColorRangeUI('samples');
-    this.refreshLabelAttributeSelect('samples');
 
     // Fusionar bounds con las otras capas ya cargadas (igual patrón que
     // loadBlockData/loadDrillholeData) para que grilla y cámara cubran la
@@ -1272,10 +1242,6 @@ class GeometApp {
       range.max,
       this.scene.blockOpacity
     );
-    // Las etiquetas de texto (pestaña Vistas) dependen del mismo conjunto de
-    // bloques visibles que el render — se regeneran en cada refresh para no
-    // quedar desincronizadas (ej. tras cambiar la sección/filtros).
-    this.scene.updateLabels('blocks');
   }
 
   triggerDrillholeRefresh() {
@@ -1289,7 +1255,6 @@ class GeometApp {
       range.min,
       range.max
     );
-    this.scene.updateLabels('drillholes');
   }
 
   triggerSamplesRefresh() {
@@ -1303,7 +1268,6 @@ class GeometApp {
       range.min,
       range.max
     );
-    this.scene.updateLabels('samples');
   }
 
   updateSectionPosLimits() {
@@ -1376,8 +1340,6 @@ class GeometApp {
           this.calcVariables.blocks = [];
           this.renderCalcPills('blocks');
           this.scene.categoryColorOverrides.blocks = {};
-          this.scene.labelConfig.blocks.attribute = null;
-          this.refreshLabelAttributeSelect('blocks');
         },
         statusId: 'status-blocks',
         selectId: 'select-color-attribute-blocks',
@@ -1395,8 +1357,6 @@ class GeometApp {
           this.calcVariables.drillholes = [];
           this.renderCalcPills('drillholes');
           this.scene.categoryColorOverrides.drillholes = {};
-          this.scene.labelConfig.drillholes.attribute = null;
-          this.refreshLabelAttributeSelect('drillholes');
         },
         statusId: 'status-drillholes',
         selectId: 'select-color-attribute-drillholes',
@@ -1413,8 +1373,6 @@ class GeometApp {
           this.calcVariables.samples = [];
           this.renderCalcPills('samples');
           this.scene.categoryColorOverrides.samples = {};
-          this.scene.labelConfig.samples.attribute = null;
-          this.refreshLabelAttributeSelect('samples');
         },
         statusId: 'status-samples',
         selectId: 'select-color-attribute-samples',
@@ -1429,7 +1387,6 @@ class GeometApp {
     // en Bloques (retorna antes de llegar a esa línea) — se fuerza acá para
     // los 3 casos, por consistencia, sin importar el detalle interno de cada uno.
     this.scene.updateLegend(target, null);
-    this.scene.updateLabels(target);
 
     const statusEl = document.getElementById(cfg.statusId);
     if (statusEl) { statusEl.className = 'badge badge-empty'; statusEl.innerText = 'Vacío'; }
@@ -2227,7 +2184,6 @@ class GeometApp {
     else calcList.push({ name, formula });
 
     this.refreshColorAttributeSelect(target);
-    this.refreshLabelAttributeSelect(target);
 
     // Auto-seleccionar la variable recién creada como atributo de coloreado activo
     this[meta.attrKey] = name;
@@ -2267,15 +2223,7 @@ class GeometApp {
       meta.refresh();
     }
 
-    // Si la variable eliminada era la que se estaba usando como etiqueta de
-    // texto (pestaña Vistas), también se deselecciona ahí.
-    if (this.scene.labelConfig[target].attribute === name) {
-      this.scene.labelConfig[target].attribute = null;
-      this.scene.updateLabels(target);
-    }
-
     this.refreshColorAttributeSelect(target);
-    this.refreshLabelAttributeSelect(target);
     this.renderCalcPills(target);
     this.logConsole('info', `Variable calculada "${name}" eliminada (${meta.label}).`);
   }
@@ -2360,7 +2308,6 @@ class GeometApp {
       this.scene.exitViewMode();
     }
 
-    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
     this.updateViewModeOrientationSummary();
   }
 
@@ -2380,49 +2327,14 @@ class GeometApp {
     el.innerText = sectionActive ? `${label}, cota/coordenada ${coord} m` : `${label} (corte inactivo — se ve todo el modelo)`;
   }
 
-  /**
-   * Repuebla el selector de "atributo a etiquetar" de una capa (pestaña
-   * Vistas) con la misma lista de atributos disponibles para Variables
-   * Calculadas (attributeMetadata/assayMetadata, incluye las ya calculadas),
-   * preservando la selección previa si ese atributo sigue existiendo.
-   */
-  refreshLabelAttributeSelect(target) {
-    const selectEl = document.getElementById(`select-label-attribute-${target}`);
-    if (!selectEl) return;
-    const meta = this._calcTargetMeta(target);
-    const data = meta.getData();
-
-    if (!data) {
-      selectEl.innerHTML = '<option value="">(Ninguno)</option>';
-      selectEl.disabled = true;
-      return;
-    }
-
-    const prevValue = selectEl.value;
-    const attrs = meta.getMetadataList(data);
-    selectEl.innerHTML = '<option value="">(Ninguno)</option>';
-    attrs.forEach(a => {
-      const opt = document.createElement('option');
-      opt.value = a.name;
-      opt.innerText = `${a.name} (${a.type === 'category' ? 'Categórico' : 'Numérico'})`;
-      selectEl.appendChild(opt);
-    });
-    selectEl.disabled = false;
-    if (attrs.some(a => a.name === prevValue)) {
-      selectEl.value = prevValue;
-    } else {
-      selectEl.value = '';
-    }
-  }
-
   // ------------------------------------------
   // Vistas guardadas (memoria de sesión)
   // ------------------------------------------
   /**
    * Guarda un snapshot de la configuración actual de Vistas (cámara/corte,
-   * etiquetas por capa, anotaciones activas) con un nombre elegido por el
-   * usuario, para poder volver a aplicarla más tarde en la misma sesión —
-   * se pierde al recargar la página, igual que Filtros/Variables Calculadas.
+   * anotaciones activas) con un nombre elegido por el usuario, para poder
+   * volver a aplicarla más tarde en la misma sesión — se pierde al recargar
+   * la página, igual que Filtros/Variables Calculadas.
    */
   saveCurrentView() {
     const name = prompt('Nombre para esta vista:', `Vista ${this.savedViews.length + 1}`);
@@ -2446,7 +2358,6 @@ class GeometApp {
         thicknessDrillholes: document.getElementById('range-section-thickness-drillholes').value,
         thicknessDxf: document.getElementById('range-section-thickness-dxf').value
       },
-      labelConfig: JSON.parse(JSON.stringify(this.scene.labelConfig)),
       annotations: { ...this.viewAnnotations }
     };
 
@@ -2456,10 +2367,9 @@ class GeometApp {
   }
 
   /**
-   * Reaplica una vista guardada: restaura el corte de sección/planta, la
-   * configuración de etiquetas por capa, las anotaciones, y — si la vista
-   * tenía Modo Vista activo — la cámara ortográfica exacta (posición/zoom),
-   * no solo un reencuadre automático nuevo.
+   * Reaplica una vista guardada: restaura el corte de sección/planta, las
+   * anotaciones, y — si la vista tenía Modo Vista activo — la cámara
+   * ortográfica exacta (posición/zoom), no solo un reencuadre automático nuevo.
    */
   applySavedView(idx) {
     const snap = this.savedViews[idx];
@@ -2488,20 +2398,7 @@ class GeometApp {
     thickDxf.value = snap.section.thicknessDxf;
     thickDxf.dispatchEvent(new Event('change'));
 
-    // 2. Restaurar configuración de etiquetas por capa
-    ['blocks', 'drillholes', 'samples'].forEach(target => {
-      const cfg = snap.labelConfig[target];
-      if (!cfg) return;
-      this.scene.labelConfig[target] = { ...cfg };
-      const selectEl = document.getElementById(`select-label-attribute-${target}`);
-      if (selectEl) selectEl.value = cfg.attribute || '';
-      const colorEl = document.getElementById(`input-label-color-${target}`);
-      if (colorEl) colorEl.value = '#' + cfg.color.toString(16).padStart(6, '0');
-      const fontEl = document.getElementById(`input-label-fontsize-${target}`);
-      if (fontEl) fontEl.value = cfg.fontSize;
-    });
-
-    // 3. Restaurar anotaciones
+    // 2. Restaurar anotaciones
     this.viewAnnotations = { ...snap.annotations };
     const annotationChecks = {
       'chk-annot-source-files': 'sourceFiles',
@@ -2516,7 +2413,7 @@ class GeometApp {
     const chkDxfNames = document.getElementById('chk-label-dxf-names');
     if (chkDxfNames) chkDxfNames.checked = !!this.viewAnnotations.dxfLayerNames;
 
-    // 4. Restaurar Modo Vista + cámara exacta guardada (posición/zoom del
+    // 3. Restaurar Modo Vista + cámara exacta guardada (posición/zoom del
     // usuario, no solo el reencuadre automático al bounds completo).
     const chkViewMode = document.getElementById('chk-view-mode-active');
     if (snap.viewModeActive && snap.camera) {
@@ -2537,7 +2434,6 @@ class GeometApp {
       this.scene.exitViewMode();
     }
 
-    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
     this.updateViewModeOrientationSummary();
     this.logConsole('success', `Vista "${snap.name}" aplicada.`);
   }
@@ -2608,19 +2504,39 @@ class GeometApp {
       const type = document.getElementById('select-section-type').value;
       const coord = document.getElementById('range-section-pos').value;
       const label = type === 'vertical-n' ? 'Sección N-S' : type === 'vertical-e' ? 'Sección E-O' : 'Planta';
-      blocks.push({
-        title: 'Cota / Sección',
-        lines: [{ text: sectionActive ? `${label} — cota/coordenada ${coord} m` : `${label} (corte inactivo)` }]
-      });
+      const lines = [{ text: sectionActive ? `${label} — cota/coordenada ${coord} m` : `${label} (corte inactivo)` }];
+      if (sectionActive) {
+        const thickBlocks = document.getElementById('range-section-thickness-blocks').value;
+        const thickDh = document.getElementById('range-section-thickness-drillholes').value;
+        const thickDxf = document.getElementById('range-section-thickness-dxf').value;
+        lines.push({ text: `Espesor ventana — Bloques: ±${thickBlocks} m` });
+        lines.push({ text: `Espesor ventana — Sondajes/Muestras: ±${thickDh} m` });
+        lines.push({ text: `Espesor ventana — Superficies DXF: ±${thickDxf} m` });
+      }
+      blocks.push({ title: 'Cota / Sección', lines });
     }
 
     if (this.viewAnnotations.variablesLegend) {
       const lines = [];
       const targetLabels = { blocks: 'Bloques', drillholes: 'Sondajes', samples: 'Muestras' };
+      // Refleja el atributo de coloreado ACTIVO de cada capa (el mismo que
+      // muestra la tarjeta de leyenda en el visor), leyendo el último
+      // snapshot cacheado en scene._lastLegendParams — no depende de ninguna
+      // configuración aparte, así que siempre está sincronizado con lo que
+      // realmente se ve coloreado en la Vista.
       ['blocks', 'drillholes', 'samples'].forEach(target => {
-        const cfg = this.scene.labelConfig[target];
-        if (cfg && cfg.attribute) {
-          lines.push({ text: `${targetLabels[target]}: ${cfg.attribute}`, swatch: '#' + cfg.color.toString(16).padStart(6, '0') });
+        const params = this.scene._lastLegendParams ? this.scene._lastLegendParams[target] : null;
+        if (!params || !params.attrMeta) return;
+        const { attrMeta, minVal, maxVal, lookupTable, paletteName } = params;
+        if (attrMeta.type === 'category') {
+          (lookupTable || []).forEach((catName, id) => {
+            const col = this.scene.getDiscreteColor(id, target, attrMeta.name, lookupTable);
+            lines.push({ text: `${targetLabels[target]} — ${attrMeta.name}: ${catName}`, swatch: '#' + col.getHexString() });
+          });
+        } else {
+          const mid = (minVal + maxVal) / 2;
+          const col = this.scene.getColorForValue(mid, minVal, maxVal, paletteName, this.scene.customPaletteColors[target]);
+          lines.push({ text: `${targetLabels[target]} — ${attrMeta.name}: ${minVal.toFixed(2)} a ${maxVal.toFixed(2)}`, swatch: '#' + col.getHexString() });
         }
       });
       if (this.viewAnnotations.dxfLayerNames) {
@@ -2673,64 +2589,175 @@ class GeometApp {
   }
 
   /**
-   * Calcula el alto (en píxeles del canvas exportado, ya multiplicados por
-   * dpr) que va a ocupar el panel de anotaciones — debe usar EXACTAMENTE
-   * las mismas constantes que _drawAnnotationPanel() para no cortar texto.
+   * Canvas 2D descartable usado sólo para medir texto (ctx.measureText) al
+   * calcular el layout del panel de anotaciones, antes de crear el canvas
+   * final — measureText depende únicamente de ctx.font, no del tamaño real
+   * del canvas, así que un canvas de 1x1 sirve.
    */
-  _estimateAnnotationPanelHeight(blocks, dpr) {
-    if (blocks.length === 0) return 0;
-    const pad = 16 * dpr, lineHeight = 18 * dpr, titleHeight = 20 * dpr, blockGap = 10 * dpr;
-    let height = pad;
-    blocks.forEach(block => {
-      height += titleHeight + block.lines.length * lineHeight + blockGap;
-    });
-    height += pad; // margen inferior (generoso: absorbe el último blockGap sin recortar texto)
-    return Math.ceil(height);
+  _measureCtx() {
+    if (!this._annotMeasureCtx) {
+      this._annotMeasureCtx = document.createElement('canvas').getContext('2d');
+    }
+    return this._annotMeasureCtx;
   }
 
-  _drawAnnotationPanel(ctx, blocks, x, y, width, height, dpr) {
-    const pad = 16 * dpr, lineHeight = 18 * dpr, titleHeight = 20 * dpr, blockGap = 10 * dpr;
+  /** Envuelve `text` en líneas que no superen `maxWidth` con la fuente ya seteada en ctx. */
+  _wrapText(ctx, text, maxWidth) {
+    const words = String(text).split(' ');
+    const lines = [];
+    let current = '';
+    words.forEach(word => {
+      const test = current ? `${current} ${word}` : word;
+      if (current && ctx.measureText(test).width > maxWidth) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = test;
+      }
+    });
+    if (current) lines.push(current);
+    return lines.length > 0 ? lines : [''];
+  }
 
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    ctx.fillRect(x, y, width, height);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = Math.max(1, dpr);
-    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+  /**
+   * Calcula el layout completo del panel de anotaciones (encabezado +
+   * columnas balanceadas, con el texto ya envuelto al ancho de columna) UNA
+   * sola vez. _drawAnnotationPanel() reutiliza este mismo objeto para
+   * dibujar, así que el alto calculado acá y lo efectivamente dibujado
+   * jamás pueden desincronizarse (a diferencia del esquema anterior con dos
+   * funciones que debían repetir las mismas constantes a mano).
+   */
+  _layoutAnnotationPanel(blocks, panelWidthPx, dpr) {
+    if (blocks.length === 0) return { columns: [], height: 0 };
 
-    let cursorY = y + pad;
-    ctx.textBaseline = 'top';
+    const pad = 18 * dpr;
+    const headerHeight = 34 * dpr;
+    const colGap = 20 * dpr;
+    const titleHeight = 20 * dpr;
+    const lineHeight = 17 * dpr;
+    const blockGap = 12 * dpr;
+    const bodyFontPx = Math.round(12 * dpr);
+    const titleFontPx = Math.round(12.5 * dpr);
 
-    blocks.forEach(block => {
-      ctx.font = `700 ${Math.round(14 * dpr)}px sans-serif`;
-      ctx.fillStyle = '#22d3ee';
-      ctx.fillText(block.title.toUpperCase(), x + pad, cursorY);
-      cursorY += titleHeight;
+    const minColWidthPx = 260 * dpr;
+    const availableWidth = panelWidthPx - pad * 2;
+    let numColumns = Math.max(1, Math.min(3, Math.floor((availableWidth + colGap) / (minColWidthPx + colGap))));
+    numColumns = Math.min(numColumns, blocks.length);
+    const columnWidth = (availableWidth - colGap * (numColumns - 1)) / numColumns;
 
-      ctx.font = `400 ${Math.round(13 * dpr)}px sans-serif`;
+    const ctx = this._measureCtx();
+    ctx.font = `400 ${bodyFontPx}px sans-serif`;
+    const swatchReserve = 12 * dpr + 6 * dpr;
+    const measuredBlocks = blocks.map(block => {
+      const measuredLines = [];
       block.lines.forEach(line => {
-        if (line.swatch) {
-          const sw = 12 * dpr;
-          ctx.fillStyle = line.swatch;
-          ctx.fillRect(x + pad, cursorY + 3 * dpr, sw, sw);
-          ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-          ctx.strokeRect(x + pad + 0.5, cursorY + 3 * dpr + 0.5, sw - 1, sw - 1);
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillText(line.text, x + pad + sw + 6 * dpr, cursorY);
-        } else {
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillText(line.text, x + pad, cursorY);
-        }
-        cursorY += lineHeight;
+        const maxW = columnWidth - (line.swatch ? swatchReserve : 0);
+        this._wrapText(ctx, line.text, maxW).forEach((wt, i) => {
+          measuredLines.push({ text: wt, swatch: i === 0 ? line.swatch : null });
+        });
       });
-      cursorY += blockGap;
+      const height = titleHeight + measuredLines.length * lineHeight + blockGap;
+      return { title: block.title, lines: measuredLines, height };
+    });
+
+    // Reparte los bloques entre columnas con un heurístico greedy (cada
+    // bloque va a la columna con menos alto acumulado hasta el momento),
+    // para balancear el largo total en vez de amontonar todo en una lista.
+    const columns = Array.from({ length: numColumns }, () => ({ blocks: [], height: 0 }));
+    measuredBlocks.forEach(mb => {
+      const shortest = columns.reduce((a, b) => (a.height <= b.height ? a : b));
+      shortest.blocks.push(mb);
+      shortest.height += mb.height;
+    });
+
+    const contentHeight = Math.max(...columns.map(c => c.height));
+    const totalHeight = headerHeight + pad + contentHeight + pad;
+
+    return {
+      columns, numColumns, columnWidth,
+      pad, headerHeight, colGap, titleHeight, lineHeight, blockGap, bodyFontPx, titleFontPx,
+      height: Math.ceil(totalHeight),
+    };
+  }
+
+  /** Dibuja el panel a partir de un layout ya calculado por _layoutAnnotationPanel(). */
+  _drawAnnotationPanel(ctx, layout, x, y, width, height, dpr) {
+    const { columns, pad, headerHeight, colGap, titleHeight, lineHeight, blockGap, columnWidth, bodyFontPx, titleFontPx } = layout;
+
+    ctx.fillStyle = 'rgba(10, 15, 24, 0.92)';
+    ctx.fillRect(x, y, width, height);
+    ctx.fillStyle = '#22d3ee';
+    ctx.fillRect(x, y, width, Math.max(2, 2 * dpr));
+
+    const headerTop = y + Math.max(2, 2 * dpr);
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 ${Math.round(15 * dpr)}px sans-serif`;
+    ctx.fillStyle = '#e2e8f0';
+    ctx.textAlign = 'left';
+    ctx.fillText('GEOMET — VISTA EXPORTADA', x + pad, headerTop + headerHeight / 2);
+
+    ctx.font = `400 ${Math.round(11 * dpr)}px sans-serif`;
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'right';
+    ctx.fillText(new Date().toLocaleString('es-CL'), x + width - pad, headerTop + headerHeight / 2);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.beginPath();
+    ctx.moveTo(x + pad, headerTop + headerHeight);
+    ctx.lineTo(x + width - pad, headerTop + headerHeight);
+    ctx.stroke();
+
+    const contentTop = headerTop + headerHeight + pad;
+    ctx.textAlign = 'left';
+
+    columns.forEach((col, colIdx) => {
+      const colX = x + pad + colIdx * (columnWidth + colGap);
+      let cursorY = contentTop;
+
+      col.blocks.forEach(block => {
+        ctx.font = `700 ${titleFontPx}px sans-serif`;
+        ctx.fillStyle = '#22d3ee';
+        ctx.fillText(block.title.toUpperCase(), colX, cursorY + titleHeight / 2);
+        cursorY += titleHeight;
+
+        ctx.font = `400 ${bodyFontPx}px sans-serif`;
+        block.lines.forEach(line => {
+          if (line.swatch) {
+            const sw = 11 * dpr;
+            ctx.fillStyle = line.swatch;
+            ctx.fillRect(colX, cursorY + (lineHeight - sw) / 2, sw, sw);
+            ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+            ctx.lineWidth = Math.max(1, dpr * 0.6);
+            ctx.strokeRect(colX + 0.5, cursorY + (lineHeight - sw) / 2 + 0.5, sw - 1, sw - 1);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(line.text, colX + sw + 6 * dpr, cursorY + lineHeight / 2);
+          } else {
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(line.text, colX, cursorY + lineHeight / 2);
+          }
+          cursorY += lineHeight;
+        });
+        cursorY += blockGap;
+      });
+
+      if (colIdx < columns.length - 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.beginPath();
+        ctx.moveTo(colX + columnWidth + colGap / 2, contentTop - pad * 0.3);
+        ctx.lineTo(colX + columnWidth + colGap / 2, y + height - pad * 0.5);
+        ctx.stroke();
+      }
     });
   }
 
   /**
    * Exporta la Vista actual como PNG: recompone en un canvas 2D nuevo la
-   * captura del canvas WebGL (con las etiquetas regeneradas al zoom/encuadre
-   * actual, para que su tamaño quede correcto) + un panel al pie con las
-   * anotaciones activas, y descarga el resultado.
+   * captura del canvas WebGL + la grilla de referencia (que es un overlay
+   * HTML/CSS, así que no queda incluida en esa captura — se redibuja aparte
+   * con scene.drawAxisRulerToCanvas()) + un panel al pie con las anotaciones
+   * activas, y descarga el resultado.
    */
   exportView() {
     if (!this.scene.viewModeActive) {
@@ -2738,10 +2765,11 @@ class GeometApp {
       return;
     }
 
-    // Regenerar etiquetas al zoom/encuadre actual: si el usuario solo hizo
-    // pan/zoom desde el último refresh de datos, el tamaño en pantalla
-    // podría haber quedado desactualizado (ver nota en scene._createLabelSprite()).
-    ['blocks', 'drillholes', 'samples'].forEach(target => this.scene.updateLabels(target));
+    // Refrescar la grilla de referencia al encuadre/zoom actual antes de
+    // leerla (se recalcula sola en cada frame de animate(), pero forzarlo
+    // acá evita depender de que ya haya corrido un frame más reciente).
+    this.scene._updateCompass();
+    this.scene._updateAxisRuler();
 
     // Forzar un render inmediato para asegurar que el canvas capturado esté al día
     this.scene.renderer.render(this.scene.scene, this.scene.camera);
@@ -2749,7 +2777,11 @@ class GeometApp {
     const sourceCanvas = this.scene.renderer.domElement;
     const dpr = this.scene.renderer.getPixelRatio();
     const annotations = this._buildExportAnnotations();
-    const panelHeight = this._estimateAnnotationPanelHeight(annotations, dpr);
+    // Layout calculado una sola vez: el alto que reserva el canvas de salida
+    // y lo que efectivamente se dibuja después vienen del mismo objeto, así
+    // que no pueden desincronizarse (no más texto cortado al pie).
+    const layout = this._layoutAnnotationPanel(annotations, sourceCanvas.width, dpr);
+    const panelHeight = layout.height;
 
     const outCanvas = document.createElement('canvas');
     outCanvas.width = sourceCanvas.width;
@@ -2760,8 +2792,13 @@ class GeometApp {
     ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
     ctx.drawImage(sourceCanvas, 0, 0);
 
+    // Grilla de referencia (líneas + cotas/coordenadas), redibujada sobre el
+    // canvas final — ver comentario del método sobre por qué no queda en la
+    // captura directa del canvas WebGL.
+    this.scene.drawAxisRulerToCanvas(ctx, sourceCanvas.width, sourceCanvas.height, dpr);
+
     if (panelHeight > 0) {
-      this._drawAnnotationPanel(ctx, annotations, 0, sourceCanvas.height, outCanvas.width, panelHeight, dpr);
+      this._drawAnnotationPanel(ctx, layout, 0, sourceCanvas.height, outCanvas.width, panelHeight, dpr);
     }
 
     const dataUrl = outCanvas.toDataURL('image/png');
