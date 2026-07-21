@@ -19,6 +19,7 @@ Está construido en JavaScript, HTML y CSS puro (sin frameworks ni paso de compi
 - Leyendas arrastrables con **on/off independiente por capa**, grilla de referencia configurable (espaciado, transparencia, tamaño de números) con cotas/coordenadas en vistas ortogonales, brújula y gizmo de ejes X/Y/Z.
 - **Eliminación de capas** cargadas (no solo ocultarlas): libera los datos y la memoria de esa capa por completo.
 - **Pestaña Vistas**: bloquea la cámara en una proyección ortográfica (sin distorsión, como un plano técnico) alineada al corte activo, con zoom y desplazamiento libres. Exporta a **PNG** el encuadre actual (incluida la grilla de referencia con sus cotas) más un panel de anotaciones opcionales con archivos de origen, filtros aplicados, cota/sección (con espesores de ventana) y leyenda de variables mostradas — listo para imprimir o compartir. Las configuraciones de vista se pueden guardar y reaplicar dentro de la misma sesión.
+- **Pestaña Planificación**: planificador de sondajes propuestos. Hacé click en el visor (Planta o una Sección de Modo Vista) para ubicar el collar — se ajusta automáticamente a la superficie DXF cargada (topografía u otra) si hay una, o a un plano de referencia si no. Definí azimuth, dip y profundidad final con previsualización en vivo (trayectoria recta), confirmá el sondaje con su HOLEID correlativo (prefijo configurable), y exportá todos los sondajes propuestos de la sesión a un archivo **Excel (.xlsx)** con collar, azimuth/dip/profundidad y punto final calculado.
 - Plantillas de mapeo de columnas guardables, para no tener que remapear archivos con el mismo formato cada vez.
 
 ## Tipos de archivo soportados
@@ -65,6 +66,7 @@ js/worker-parser.js  Web Worker: parseo de CSV/DXF fuera del hilo principal
 js/dxf-parser.js     Parser DXF (streaming, corre dentro del Worker)
 js/octree.js         Índice espacial para filtrado rápido por sección
 js/formula-eval.js   Parser/evaluador de fórmulas para Variables Calculadas
+js/drill-planner.js  Planificador de Sondajes: trayectoria recta, HOLEID correlativo, export a Excel
 js/presets.js        Paletas de color y presets
 start_server.ps1     Script para levantar un servidor local en Windows
 ```

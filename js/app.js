@@ -44,6 +44,15 @@ class GeometApp {
     // armado sin rehacerlo a mano. Ver saveCurrentView()/applySavedView().
     this.savedViews = [];
 
+    // Planificador de Sondajes (pestaña Planificación): estado de sesión con
+    // los sondajes PROPUESTOS (collar + azimuth/dip/profundidad + HOLEID
+    // correlativo) — ver js/drill-planner.js. drillPlannerPicking indica si
+    // el próximo click en el visor 3D debe interpretarse como "definir
+    // collar" en vez de la interacción normal de cámara/tooltip.
+    this.drillPlanner = new DrillPlanner();
+    this.drillPlannerPicking = false;
+    this.drillPlannerPendingCollar = null; // {x,y,z} recién pickeado, a la espera de "Confirmar Sondaje"
+
     // Web Worker
     this.worker = null;
   }
@@ -52,8 +61,9 @@ class GeometApp {
     // 1. Inicializar Visor 3D y Controladores
     this.scene = new GeometScene('three-canvas');
     this.importer = new GeometImporter();
-    
+
     this.initUIEventListeners();
+    this.initDrillPlannerListeners();
     this.initConsoleControl();
     this.initDraggableLegends();
 
@@ -473,6 +483,287 @@ class GeometApp {
     const btnSaveView = document.getElementById('btn-save-view');
     if (btnSaveView) {
       btnSaveView.addEventListener('click', () => this.saveCurrentView());
+    }
+  }
+
+  // ==========================================
+  // PLANIFICADOR DE SONDAJES (pestaña Planificación)
+  // ==========================================
+  /**
+   * Conecta los controles del Planificador de Sondajes: activar/cancelar el
+   * modo de click para definir el collar, inputs de azimuth/dip/profundidad
+   * con previsualización en vivo del sondaje mientras se arma, ajuste fino
+   * manual del collar ya pickeado, prefijo de HOLEID, confirmar/eliminar/
+   * vaciar sondajes propuestos, y exportar a Excel. El click real sobre el
+   * visor 3D se escucha directamente en el canvas de la escena — ver
+   * onDrillPlannerCanvasClick().
+   */
+  initDrillPlannerListeners() {
+    const btnStartPick = document.getElementById('btn-planner-start-pick');
+    if (btnStartPick) {
+      btnStartPick.addEventListener('click', () => this.toggleDrillPlannerPicking());
+    }
+
+    if (this.scene && this.scene.canvas) {
+      this.scene.canvas.addEventListener('click', (e) => this.onDrillPlannerCanvasClick(e));
+    }
+
+    ['input-planner-azimuth', 'input-planner-dip', 'input-planner-depth'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => this.previewProposedHole());
+    });
+
+    ['input-planner-collar-x', 'input-planner-collar-y', 'input-planner-collar-z'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => {
+        // Permite ajuste fino manual del collar recién pickeado, antes de confirmar.
+        if (!this.drillPlannerPendingCollar) return;
+        this.drillPlannerPendingCollar.x = parseFloat(document.getElementById('input-planner-collar-x').value) || 0;
+        this.drillPlannerPendingCollar.y = parseFloat(document.getElementById('input-planner-collar-y').value) || 0;
+        this.drillPlannerPendingCollar.z = parseFloat(document.getElementById('input-planner-collar-z').value) || 0;
+        this.previewProposedHole();
+      });
+    });
+
+    const inputPrefix = document.getElementById('input-planner-prefix');
+    if (inputPrefix) {
+      inputPrefix.addEventListener('change', (e) => {
+        this.drillPlanner.setPrefix(e.target.value);
+        inputPrefix.value = this.drillPlanner.prefix;
+        this.updatePlannerNextHoleIdLabel();
+      });
+    }
+
+    const btnConfirm = document.getElementById('btn-planner-confirm-hole');
+    if (btnConfirm) {
+      btnConfirm.addEventListener('click', () => this.confirmProposedHole());
+    }
+
+    const btnClearAll = document.getElementById('btn-planner-clear-all');
+    if (btnClearAll) {
+      btnClearAll.addEventListener('click', () => {
+        if (this.drillPlanner.holes.length === 0) return;
+        if (!confirm('¿Eliminar todos los sondajes propuestos de esta sesión?')) return;
+        this.drillPlanner.clear();
+        this.refreshProposedHolesRender();
+        this.renderProposedHolesList();
+        this.updatePlannerNextHoleIdLabel();
+        this.logConsole('info', 'Planificador: se eliminaron todos los sondajes propuestos.');
+      });
+    }
+
+    const btnExportExcel = document.getElementById('btn-planner-export-excel');
+    if (btnExportExcel) {
+      btnExportExcel.addEventListener('click', () => this.exportProposedHoles());
+    }
+
+    this.updatePlannerNextHoleIdLabel();
+    this.renderProposedHolesList();
+  }
+
+  /** Activa/cancela el modo de click para definir el collar del próximo sondaje propuesto. */
+  toggleDrillPlannerPicking() {
+    this.drillPlannerPicking = !this.drillPlannerPicking;
+    const btn = document.getElementById('btn-planner-start-pick');
+    const info = document.getElementById('planner-picking-info');
+
+    if (this.drillPlannerPicking) {
+      if (btn) { btn.innerText = 'Cancelar (esperando click en el visor)'; btn.style.background = 'var(--accent-red)'; }
+      if (info) info.innerText = 'Modo activo: hacé click en el visor 3D para ubicar el collar. Volvé a apretar este botón para cancelar.';
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = 'crosshair';
+    } else {
+      if (btn) { btn.innerText = 'Click para Definir Collar'; btn.style.background = ''; }
+      if (info) info.innerText = 'Hacé click en el visor 3D (funciona en Planta o en una Sección de Modo Vista) para ubicar el collar. Si hay una superficie DXF cargada (ej. topografía), el collar se ajusta automáticamente a ella.';
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = '';
+    }
+  }
+
+  /**
+   * Maneja el click sobre el canvas 3D mientras el modo de picking del
+   * Planificador está activo: intenta apoyar el collar sobre una malla DXF
+   * (topografía u otra superficie cargada) vía scene.pickCollarAtNDC(); si no
+   * hay ninguna DXF o el rayo no impacta nada, cae a un plano horizontal de
+   * referencia (cota promedio del modelo de bloques, o Z=0) — el usuario
+   * puede ajustar Z a mano en los campos de collar de todas formas.
+   */
+  onDrillPlannerCanvasClick(event) {
+    if (!this.drillPlannerPicking) return;
+
+    const canvas = this.scene.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    let collar = this.scene.pickCollarAtNDC(ndcX, ndcY);
+    if (!collar) {
+      let referenceZ = 0;
+      if (this.blockData && this.blockData.positions && this.blockData.positions.length >= 3) {
+        const positions = this.blockData.positions;
+        let sumZ = 0, count = 0;
+        for (let i = 2; i < positions.length; i += 3) { sumZ += positions[i]; count++; }
+        referenceZ = count > 0 ? sumZ / count : 0;
+      }
+      collar = this.scene.pickOnHorizontalPlaneAtNDC(ndcX, ndcY, referenceZ);
+      if (collar) {
+        this.logConsole('warn', 'Planificador: no se encontró una superficie DXF donde apoyar el collar. Se ubicó en un plano de referencia — ajustá la cota Z manualmente si hace falta.');
+      }
+    }
+
+    if (!collar) {
+      this.logConsole('error', 'Planificador: no se pudo determinar una posición de collar en ese punto.');
+      return;
+    }
+
+    this.drillPlannerPendingCollar = collar;
+    ['input-planner-collar-x', 'input-planner-collar-y', 'input-planner-collar-z'].forEach((id, i) => {
+      const el = document.getElementById(id);
+      const val = i === 0 ? collar.x : i === 1 ? collar.y : collar.z;
+      el.value = val.toFixed(2);
+      el.disabled = false;
+    });
+    document.getElementById('btn-planner-confirm-hole').disabled = false;
+
+    // Sale del modo de picking tras un click exitoso — el usuario lo
+    // reactiva para el próximo sondaje. Evita seguir "armado" mientras
+    // navega la cámara con OrbitControls.
+    this.drillPlannerPicking = false;
+    const btn = document.getElementById('btn-planner-start-pick');
+    if (btn) { btn.innerText = 'Click para Definir Collar'; btn.style.background = ''; }
+    canvas.style.cursor = '';
+
+    this.previewProposedHole();
+    this.logConsole('success', `Planificador: collar ubicado en (${collar.x.toFixed(2)}, ${collar.y.toFixed(2)}, ${collar.z.toFixed(2)}).`);
+  }
+
+  /**
+   * Recalcula y redibuja la previsualización del sondaje que se está
+   * armando (collar ya pickeado + los valores actuales de azimuth/dip/
+   * profundidad de los inputs), junto con los ya confirmados — sin
+   * agregarlo todavía a drillPlanner.holes (eso ocurre recién al confirmar).
+   * Se distingue con un color celeste distinto del ámbar de los ya
+   * confirmados, para marcarlo visualmente como "en edición".
+   */
+  previewProposedHole() {
+    if (!this.drillPlannerPendingCollar) {
+      this.refreshProposedHolesRender();
+      return;
+    }
+    const azimuth = parseFloat(document.getElementById('input-planner-azimuth').value) || 0;
+    const dip = parseFloat(document.getElementById('input-planner-dip').value) || 0;
+    const depth = parseFloat(document.getElementById('input-planner-depth').value) || 0;
+    const endPoint = DrillPlanner.computeEndPoint(this.drillPlannerPendingCollar, azimuth, dip, depth);
+
+    const previewHole = {
+      holeId: this.drillPlanner.peekNextHoleId(),
+      collar: this.drillPlannerPendingCollar,
+      azimuth, dip, depth,
+      endPoint,
+      color: '#38bdf8',
+      visible: true,
+    };
+
+    this.scene.updateProposedHolesRender([...this.drillPlanner.holes, previewHole]);
+  }
+
+  /** Confirma el sondaje en edición: lo agrega a drillPlanner.holes con su HOLEID correlativo y limpia el formulario. */
+  confirmProposedHole() {
+    if (!this.drillPlannerPendingCollar) return;
+    const azimuth = parseFloat(document.getElementById('input-planner-azimuth').value) || 0;
+    const dip = parseFloat(document.getElementById('input-planner-dip').value) || 0;
+    const depth = parseFloat(document.getElementById('input-planner-depth').value) || 0;
+
+    if (depth <= 0) {
+      alert('La profundidad final debe ser mayor a 0.');
+      return;
+    }
+
+    const hole = this.drillPlanner.addHole({ collar: this.drillPlannerPendingCollar, azimuth, dip, depth });
+
+    this.drillPlannerPendingCollar = null;
+    ['input-planner-collar-x', 'input-planner-collar-y', 'input-planner-collar-z'].forEach(id => {
+      const el = document.getElementById(id);
+      el.value = '';
+      el.disabled = true;
+    });
+    document.getElementById('btn-planner-confirm-hole').disabled = true;
+
+    this.refreshProposedHolesRender();
+    this.renderProposedHolesList();
+    this.updatePlannerNextHoleIdLabel();
+    this.logConsole('success', `Planificador: sondaje propuesto agregado (${hole.holeId}).`);
+  }
+
+  updatePlannerNextHoleIdLabel() {
+    const el = document.getElementById('planner-next-holeid');
+    if (el) el.innerText = this.drillPlanner.peekNextHoleId();
+  }
+
+  refreshProposedHolesRender() {
+    this.scene.updateProposedHolesRender(this.drillPlanner.holes);
+  }
+
+  /** Redibuja la lista de sondajes propuestos (tabla/tarjetas de la pestaña Planificación). */
+  renderProposedHolesList() {
+    const container = document.getElementById('proposed-holes-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (this.drillPlanner.holes.length === 0) {
+      container.innerHTML = '<div class="empty-notice">No hay sondajes propuestos. Definí un collar para empezar.</div>';
+      return;
+    }
+
+    this.drillPlanner.holes.forEach((hole) => {
+      const pill = document.createElement('div');
+      pill.className = 'filter-pill';
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'pill-text';
+      textSpan.innerHTML = `<strong>${this.escapeHtml(hole.holeId)}</strong> — Az ${hole.azimuth.toFixed(0)}° / Dip ${hole.dip.toFixed(0)}° / ${hole.depth.toFixed(0)} m<br>` +
+        `<span style="opacity:0.7;">Collar: ${hole.collar.x.toFixed(1)}, ${hole.collar.y.toFixed(1)}, ${hole.collar.z.toFixed(1)}</span>`;
+
+      const actions = document.createElement('div');
+      actions.className = 'pill-actions';
+
+      const btnToggleVis = document.createElement('button');
+      btnToggleVis.className = 'btn btn-xs btn-outline';
+      btnToggleVis.innerText = hole.visible ? 'Ocultar' : 'Mostrar';
+      btnToggleVis.addEventListener('click', () => {
+        hole.visible = !hole.visible;
+        this.refreshProposedHolesRender();
+        this.renderProposedHolesList();
+      });
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn-icon';
+      btnDelete.style.color = 'var(--accent-red)';
+      btnDelete.innerText = '×';
+      btnDelete.addEventListener('click', () => {
+        this.drillPlanner.removeHole(hole.holeId);
+        this.refreshProposedHolesRender();
+        this.renderProposedHolesList();
+      });
+
+      actions.appendChild(btnToggleVis);
+      actions.appendChild(btnDelete);
+
+      pill.appendChild(textSpan);
+      pill.appendChild(actions);
+      container.appendChild(pill);
+    });
+  }
+
+  /** Exporta todos los sondajes propuestos de la sesión a un archivo .xlsx (SheetJS). */
+  exportProposedHoles() {
+    if (this.drillPlanner.holes.length === 0) {
+      alert('No hay sondajes propuestos para exportar.');
+      return;
+    }
+    try {
+      this.drillPlanner.exportToExcel();
+      this.logConsole('success', `Planificador: ${this.drillPlanner.holes.length} sondaje(s) propuesto(s) exportado(s) a Excel.`);
+    } catch (err) {
+      this.logConsole('error', `Planificador: error al exportar a Excel — ${err.message}`);
     }
   }
 

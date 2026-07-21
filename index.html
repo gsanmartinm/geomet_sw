@@ -13,6 +13,9 @@
   <!-- Three.js y OrbitControls CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- SheetJS: escritura de .xlsx en el navegador, usada por la Pestaña
+       Planificación para exportar los sondajes propuestos. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="dark-mode">
   <!-- Layout Principal -->
@@ -200,6 +203,7 @@
           <button class="tab-btn active" data-tab="tab-viz">Visualización</button>
           <button class="tab-btn" data-tab="tab-filters">Filtros & Secciones</button>
           <button class="tab-btn" data-tab="tab-views">Vistas</button>
+          <button class="tab-btn" data-tab="tab-planner">Planificación</button>
         </div>
 
         <div class="sidebar-content">
@@ -707,6 +711,86 @@
             </div>
 
           </div>
+
+          <!-- PESTAÑA PLANIFICACIÓN DE SONDAJES -->
+          <div id="tab-planner" class="tab-panel">
+
+            <div class="filter-section">
+              <div class="filter-section-title">
+                <span>Nuevo Sondaje Propuesto</span>
+              </div>
+              <span class="info-label" id="planner-picking-info">Hacé click en el visor 3D (funciona en Planta o en una Sección de Modo Vista) para ubicar el collar. Si hay una superficie DXF cargada (ej. topografía), el collar se ajusta automáticamente a ella.</span>
+              <div class="settings-group" style="margin-top: 10px;">
+                <button class="btn btn-primary" id="btn-planner-start-pick" style="width: 100%;">Click para Definir Collar</button>
+              </div>
+
+              <div class="form-row mt-3">
+                <div class="form-group col-4">
+                  <label for="input-planner-collar-x">Collar X</label>
+                  <input type="number" id="input-planner-collar-x" class="form-control" step="0.01" disabled>
+                </div>
+                <div class="form-group col-4">
+                  <label for="input-planner-collar-y">Collar Y</label>
+                  <input type="number" id="input-planner-collar-y" class="form-control" step="0.01" disabled>
+                </div>
+                <div class="form-group col-4">
+                  <label for="input-planner-collar-z">Collar Z</label>
+                  <input type="number" id="input-planner-collar-z" class="form-control" step="0.01" disabled>
+                </div>
+              </div>
+
+              <div class="form-row mt-2">
+                <div class="form-group col-4">
+                  <label for="input-planner-azimuth">Azimuth (0-360°)</label>
+                  <input type="number" id="input-planner-azimuth" class="form-control" value="0" min="0" max="360" step="1">
+                </div>
+                <div class="form-group col-4">
+                  <label for="input-planner-dip">Dip (° bajo horizontal, negativo)</label>
+                  <input type="number" id="input-planner-dip" class="form-control" value="-60" max="0" step="1">
+                </div>
+                <div class="form-group col-4">
+                  <label for="input-planner-depth">Profundidad Final (m)</label>
+                  <input type="number" id="input-planner-depth" class="form-control" value="100" min="0.1" step="1">
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 10px;">
+                <span class="info-label">Próximo HOLEID: <strong id="planner-next-holeid">—</strong></span>
+              </div>
+
+              <div class="settings-group" style="margin-top: 10px;">
+                <button class="btn btn-primary" id="btn-planner-confirm-hole" style="width: 100%;" disabled>Confirmar Sondaje</button>
+              </div>
+            </div>
+
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Numeración de HOLEID</span>
+              </div>
+              <div class="form-row mt-2">
+                <div class="form-group col-12">
+                  <label for="input-planner-prefix">Prefijo</label>
+                  <input type="text" id="input-planner-prefix" class="form-control" value="PROP">
+                </div>
+              </div>
+            </div>
+
+            <div class="filter-section mt-4">
+              <div class="filter-section-title">
+                <span>Sondajes Propuestos (esta sesión)</span>
+                <button class="btn btn-xs btn-outline" id="btn-planner-clear-all">Eliminar Todos</button>
+              </div>
+              <div id="proposed-holes-list" class="filters-container">
+                <div class="empty-notice">No hay sondajes propuestos. Definí un collar para empezar.</div>
+              </div>
+            </div>
+
+            <div class="filter-section mt-4">
+              <button class="btn btn-primary" id="btn-planner-export-excel" style="width: 100%;">Exportar a Excel (.xlsx)</button>
+            </div>
+
+          </div>
+
         </div>
       </aside>
     </main>
@@ -859,6 +943,7 @@
        hilo principal — ver runDXFImport() en importer.js. -->
   <script src="js/scene.js"></script>
   <script src="js/importer.js"></script>
+  <script src="js/drill-planner.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

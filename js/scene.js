@@ -134,8 +134,13 @@ class GeometScene {
 
     this.drillholesGroup = new THREE.Group();
     this.dxfGroup = new THREE.Group();
+    // Sondajes PROPUESTOS por el Planificador de Sondajes (pestaña
+    // Planificación) — grupo separado de drillholesGroup para no mezclar
+    // diseños en revisión con sondajes reales ya perforados.
+    this.proposedHolesGroup = new THREE.Group();
     this.scene.add(this.drillholesGroup);
     this.scene.add(this.dxfGroup);
+    this.scene.add(this.proposedHolesGroup);
 
     // Datos cargados en memoria listos para render
     this.blockData = null;       // Datos directos desde el Worker
@@ -1562,6 +1567,123 @@ class GeometScene {
     } else {
       this.updateLegend('drillholes', null);
     }
+  }
+
+  // ==========================================
+  // PLANIFICADOR DE SONDAJES (sondajes PROPUESTOS)
+  // ==========================================
+  /**
+   * Redibuja los sondajes propuestos por el Planificador (pestaña
+   * Planificación) como cilindros instanciados — mismo patrón visual que
+   * updateDrillholeRender() (un solo cilindro recto por sondaje, ya que las
+   * propuestas son trayectorias rectas dip/azimuth constantes, sin tramos
+   * de desviación), pero en su propio grupo (proposedHolesGroup) para no
+   * mezclarse con sondajes reales ya perforados, y coloreado por sondaje
+   * (no por atributo, ya que son diseños sin datos de ensayo).
+   *
+   * `holes` es el array de DrillPlanner.holes (o una copia con una entrada
+   * de previsualización agregada mientras se edita un sondaje sin
+   * confirmar todavía — ver previewProposedHole() en app.js).
+   */
+  updateProposedHolesRender(holes) {
+    while (this.proposedHolesGroup.children.length > 0) {
+      const child = this.proposedHolesGroup.children[0];
+      this.proposedHolesGroup.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
+    }
+
+    const visibleHoles = (holes || []).filter(h => h.visible !== false);
+    if (visibleHoles.length === 0) return;
+
+    const cylGeom = new THREE.CylinderGeometry(0.5, 0.5, 1.0, 6);
+    const cylMat = new THREE.MeshLambertMaterial({ roughness: 0.3 });
+    const mesh = new THREE.InstancedMesh(cylGeom, cylMat, visibleHoles.length);
+    const dummy = new THREE.Object3D();
+    const upVector = new THREE.Vector3(0, 1, 0);
+    // Espesor visual: un poco más grueso que un sondaje real (thickness*0.25
+    // en updateDrillholeRender) para que la propuesta se note como tal
+    // incluso con el mismo lenguaje visual (cilindro instanciado).
+    const thickness = this.drillholeThickness || 3;
+    let instanceCount = 0;
+
+    visibleHoles.forEach((hole) => {
+      const p1 = new THREE.Vector3(hole.collar.x, hole.collar.y, hole.collar.z);
+      const p2 = new THREE.Vector3(hole.endPoint.x, hole.endPoint.y, hole.endPoint.z);
+      const dir = new THREE.Vector3().subVectors(p2, p1);
+      const len = dir.length();
+      if (len <= 0) return;
+
+      const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+      dir.normalize();
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(upVector, dir);
+
+      dummy.position.copy(midPoint);
+      dummy.quaternion.copy(quaternion);
+      dummy.scale.set(thickness * 0.3, len, thickness * 0.3);
+      dummy.updateMatrix();
+
+      mesh.setMatrixAt(instanceCount, dummy.matrix);
+      mesh.setColorAt(instanceCount, new THREE.Color(hole.color || '#f59e0b'));
+      instanceCount++;
+    });
+
+    mesh.count = instanceCount;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.userData = { proposedHoles: visibleHoles };
+
+    if (instanceCount > 0) this.proposedHolesGroup.add(mesh);
+    else { mesh.geometry.dispose(); mesh.material.dispose(); }
+  }
+
+  /**
+   * Intenta ubicar un collar sobre las superficies/mallas DXF cargadas,
+   * mediante un raycast desde la cámara ACTIVA (this.camera ya apunta a la
+   * perspectiva o a la ortográfica de Modo Vista según corresponda — ver
+   * enterViewMode()/exitViewMode() — y THREE.Raycaster soporta ambos tipos
+   * de cámara de forma transparente, así que este método funciona igual en
+   * Planta, en una Sección de Modo Vista, o en la vista libre). `ndcX`/`ndcY`
+   * son coordenadas normalizadas de dispositivo (-1 a 1). Devuelve
+   * `{x, y, z}` en el primer punto de impacto, o `null` si no hay ninguna
+   * malla DXF cargada o el rayo no impacta ninguna.
+   */
+  pickCollarAtNDC(ndcX, ndcY) {
+    const mouse = new THREE.Vector2(ndcX, ndcY);
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    const targets = [];
+    Object.values(this.dxfMeshes).forEach(group => {
+      group.traverse(obj => {
+        if (obj.isMesh) targets.push(obj);
+      });
+    });
+    if (targets.length === 0) return null;
+
+    const intersects = this.raycaster.intersectObjects(targets, false);
+    if (intersects.length === 0) return null;
+
+    const p = intersects[0].point;
+    return { x: p.x, y: p.y, z: p.z };
+  }
+
+  /**
+   * Fallback para cuando no hay ninguna malla DXF donde apoyar el collar (o
+   * el rayo no impactó ninguna): intersecta el rayo de cámara con un plano
+   * horizontal a la cota `referenceZ` (por ejemplo, el centro Z del modelo
+   * de bloques cargado). Devuelve `{x, y, z}` o `null` si el rayo es
+   * paralelo al plano (cámara mirando exactamente de canto).
+   */
+  pickOnHorizontalPlaneAtNDC(ndcX, ndcY, referenceZ) {
+    const mouse = new THREE.Vector2(ndcX, ndcY);
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -referenceZ);
+    const target = new THREE.Vector3();
+    const hit = this.raycaster.ray.intersectPlane(plane, target);
+    if (!hit) return null;
+
+    return { x: target.x, y: target.y, z: referenceZ };
   }
 
   // ==========================================
