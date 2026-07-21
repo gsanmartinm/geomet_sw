@@ -14,6 +14,11 @@
   --accent-amber: hsl(40, 95%, 55%);
   --accent-red: hsl(0, 85%, 60%);
   --grid-green: hsl(140, 40%, 50%);
+  /* Reservado para elementos de DISEÑO/PROPUESTA (aún no ejecutados en
+     terreno) — ej. sondajes propuestos del Planificador — para no
+     compartir tono con --accent-amber, que en el resto de la app siempre
+     significa "advertencia". */
+  --accent-violet: hsl(255, 92%, 76%);
   
   --text-main: hsl(220, 15%, 88%);
   --text-muted: hsl(220, 10%, 60%);
@@ -27,6 +32,87 @@
   --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   
   --console-height: 200px;
+}
+
+/* Tema claro (toggle en el header — ver initThemeToggle() en app.js,
+   persiste en localStorage). Decisión de alcance: el VISOR 3D y todo lo que
+   flota directamente sobre él (leyendas, brújula, tooltip, badge del
+   Planificador, toasts, FPS/navegación) se mantienen con su estilo oscuro
+   en los dos temas — es una convención común en software CAD/GIS
+   profesional (mejor contraste para datos coloreados sobre fondo oscuro,
+   sin importar el tema del resto de la interfaz) y reduce el riesgo de
+   deslavar los colores de leyes/atributos contra un fondo blanco. El tema
+   claro sólo cambia el CHROME de la app: header, ambos sidebars, tabs,
+   acordeones, formularios, consola inferior y el modal de importación. */
+body.light-mode {
+  --bg-primary: hsl(220, 25%, 97%);
+  --bg-secondary: hsl(220, 20%, 92%);
+  --bg-panel: hsla(220, 30%, 100%, 0.75);
+  --bg-card: hsla(220, 20%, 100%, 0.9);
+  --bg-active: hsl(220, 20%, 84%);
+
+  --border-color: hsla(220, 15%, 35%, 0.22);
+
+  --text-main: hsl(220, 25%, 15%);
+  --text-muted: hsl(220, 10%, 40%);
+  /* --text-dark no cambia: sigue usándose para texto sobre botones de
+     acento brillante (ej. .btn-primary), que se mantienen brillantes en
+     los dos temas. */
+}
+body.light-mode .sidebar-tabs,
+body.light-mode .accordion-group,
+body.light-mode .filter-section,
+body.light-mode .filter-builder,
+body.light-mode #active-calc-list-blocks,
+body.light-mode #active-calc-list-drillholes,
+body.light-mode #active-calc-list-samples,
+body.light-mode .multi-file-row,
+body.light-mode .mapping-table-container,
+body.light-mode .console-body {
+  background-color: rgba(0, 0, 0, 0.045);
+}
+body.light-mode .project-info-panel,
+body.light-mode .console-header,
+body.light-mode .table th,
+body.light-mode .modal-header,
+body.light-mode .modal-footer {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+body.light-mode .tab-btn:hover,
+body.light-mode .tab-btn.active,
+body.light-mode .badge-empty,
+body.light-mode .btn-outline:hover,
+body.light-mode .calc-chip-btn,
+body.light-mode .tree-node-content:hover,
+body.light-mode .table tbody tr:hover,
+body.light-mode .file-drop-area {
+  background-color: rgba(0, 0, 0, 0.035);
+}
+body.light-mode .stats-list li,
+body.light-mode .console-msg {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Los widgets que flotan SOBRE el visor 3D (leyendas, brújula, FPS/
+   navegación, badge del Planificador — todos comparten la clase
+   .overlay-card) heredan --bg-panel/--border-color/--text-main/--text-muted
+   igual que el resto del chrome, así que sin este bloque quedarían con
+   fondo claro en tema claro — justo lo que la decisión de alcance de más
+   arriba dice que NO debe pasar. Redeclarando las variables acá, en el
+   propio .overlay-card, todos sus descendientes (legend-subtitle,
+   compass-label, botones de navegación, etc.) las heredan ya oscuras sin
+   tener que repetir la regla en cada uno. */
+body.light-mode .overlay-card {
+  --bg-panel: hsla(220, 20%, 15%, 0.7);
+  --border-color: hsla(220, 15%, 30%, 0.3);
+  --text-main: hsl(220, 15%, 88%);
+  --text-muted: hsl(220, 10%, 60%);
+}
+/* El tooltip del visor no es descendiente de .overlay-card (vive aparte,
+   #three-tooltip) y ya usa un fondo oscuro fijo — sólo falta anclar el color
+   de texto para que no se vuelva oscuro-sobre-oscuro en tema claro. */
+body.light-mode .custom-tooltip {
+  --text-main: hsl(220, 15%, 88%);
 }
 
 /* Reset y Base */
@@ -100,7 +186,7 @@ body {
 }
 
 #main-header .version-tag {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   background: hsla(180, 80%, 50%, 0.1);
   color: var(--accent-cyan);
   border: 1px solid rgba(0, 255, 255, 0.2);
@@ -254,7 +340,7 @@ body {
 }
 
 .badge {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: 600;
@@ -446,6 +532,124 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+/* Introducción breve al inicio de cada pestaña del sidebar derecho (qué
+   hace la pestaña, en 1 línea) + ícono "?" con más detalle al pasar el
+   mouse (title nativo, sin JS ni popover que mantener) — mejora la
+   descubribilidad de funciones que no son obvias a primera vista (Modo
+   Vista, Variables Calculadas, Planificación). */
+.tab-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+.tab-intro-text h3 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+.tab-intro-text p {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.tab-help-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  transition: var(--transition-smooth);
+}
+.tab-help-icon:hover {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
+}
+
+/* Notificaciones "toast" — ver showToast() en app.js. Se apilan arriba a
+   la derecha, debajo del header, para no competir con el badge de picking
+   (centrado) ni con las tarjetas del visor (esquina inferior). */
+#toast-container {
+  position: fixed;
+  top: 62px;
+  right: 20px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 320px;
+}
+.toast {
+  background-color: var(--bg-panel);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  color: var(--text-main);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+.toast-success { border-left-color: var(--accent-cyan); }
+.toast-warn { border-left-color: var(--accent-amber); }
+.toast-error { border-left-color: var(--accent-red); }
+.toast-info { border-left-color: var(--text-muted); }
+
+/* Badge de modo activo del Planificador de Sondajes (picking de collar) —
+   ver toggleDrillPlannerPicking()/onDrillPlannerCanvasClick() en app.js.
+   Centrado arriba del visor: el usuario tiene la atención puesta en la
+   escena 3D en ese momento, no en el sidebar donde vive el resto del
+   formulario, así que el feedback de "modo activo" no puede depender sólo
+   de un cambio de texto/color en un botón del panel lateral. */
+.planner-picking-badge {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--accent-violet);
+  color: var(--accent-violet);
+  font-weight: 600;
+  animation: planner-badge-pulse 1.6s ease-in-out infinite;
+}
+.planner-picking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-violet);
+  box-shadow: 0 0 6px var(--accent-violet);
+  flex-shrink: 0;
+}
+@keyframes planner-badge-pulse {
+  0%, 100% { box-shadow: 0 0 8px hsla(255, 92%, 76%, 0.25); }
+  50% { box-shadow: 0 0 18px hsla(255, 92%, 76%, 0.55); }
+}
+
 .fps-counter {
   font-family: var(--font-display);
 }
@@ -470,7 +674,7 @@ body {
   justify-content: center;
   border-radius: 4px;
   font-family: var(--font-display);
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 700;
   cursor: pointer;
   transition: var(--transition-smooth);
@@ -507,6 +711,11 @@ body {
   border: 1px solid rgba(100, 200, 255, 0.25);
   background: radial-gradient(circle, rgba(30, 50, 80, 0.8), rgba(10, 20, 35, 0.95));
 }
+/* Excepción deliberada al piso de 0.7rem del resto de la app: el anillo de
+   la brújula mide 60px de diámetro y las 4 etiquetas (N/E/S/O) están
+   ancladas a sus bordes — subir la fuente acá las hace chocar entre sí o
+   salirse del círculo. Se prioriza que el widget siga siendo legible como
+   conjunto antes que el tamaño de cada letra suelta. */
 .compass-label {
   position: absolute;
   font-size: 0.6rem;
@@ -561,7 +770,7 @@ body {
   transform: translateX(-1.5px);
 }
 .compass-view-label {
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   color: var(--text-muted);
   font-family: var(--font-display);
   text-align: center;
@@ -601,7 +810,7 @@ body {
   cursor: move;
 }
 .legend-subtitle {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -693,7 +902,7 @@ input[type="color"].form-control {
 }
 .info-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   margin-top: 4px;
   font-style: italic;
@@ -731,7 +940,7 @@ input[type="color"].form-control {
 }
 .legend-toggle-inline span {
   font-family: var(--font-sans);
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   font-weight: 400;
   text-transform: none;
   letter-spacing: normal;
@@ -984,7 +1193,7 @@ input:checked + .slider:before {
   border: 1px solid var(--border-color);
   border-radius: 12px;
   color: var(--text-main);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   padding: 3px 9px;
   cursor: pointer;
   transition: var(--transition-smooth);
@@ -1419,7 +1628,7 @@ input:checked + .slider:before {
   gap: 4px;
 }
 .color-range-label {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;

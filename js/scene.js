@@ -1624,7 +1624,7 @@ class GeometScene {
       dummy.updateMatrix();
 
       mesh.setMatrixAt(instanceCount, dummy.matrix);
-      mesh.setColorAt(instanceCount, new THREE.Color(hole.color || '#f59e0b'));
+      mesh.setColorAt(instanceCount, new THREE.Color(hole.color || '#a78bfa'));
       instanceCount++;
     });
 
@@ -2194,6 +2194,7 @@ class GeometScene {
     // filtro, atributo, paleta, etc.).
     if (!attrMeta || !this.legendVisible[target]) {
       legendEl.classList.add('hidden');
+      this._restackLegendCards();
       return;
     }
 
@@ -2237,6 +2238,41 @@ class GeometScene {
         container.appendChild(row);
       }
     }
+
+    this._restackLegendCards();
+  }
+
+  /**
+   * Reacomoda verticalmente las tarjetas de leyenda (Bloques/Sondajes/
+   * Muestras) apiladas por defecto en la esquina inferior derecha del
+   * visor, según cuáles están VISIBLES en este momento y su alto real —
+   * evita que se superpongan cuando hay varias activas a la vez o la
+   * ventana es baja (antes usaban offsets fijos en píxeles: bottom 20/210/
+   * 400px, pensados para 1 leyenda "típica" cada uno, no para el alto real
+   * de cada una).
+   *
+   * Sólo reposiciona tarjetas que el usuario NO arrastró a mano — ver
+   * initDraggableLegends() en app.js, que marca card.dataset.userPositioned
+   * al iniciar un arrastre — para no pelear con una posición elegida
+   * deliberadamente.
+   */
+  _restackLegendCards() {
+    const order = ['blocks', 'drillholes', 'samples'];
+    const gap = 10;
+    let cursorBottom = 20; // mismo offset inicial que .legend-card-blocks por defecto en index.css
+
+    order.forEach(target => {
+      const card = document.getElementById(`legend-${target}`);
+      if (!card || card.classList.contains('hidden')) return;
+      if (card.dataset.userPositioned === 'true') return;
+
+      card.style.bottom = `${cursorBottom}px`;
+      card.style.right = '20px';
+      card.style.left = 'auto';
+      card.style.top = 'auto';
+
+      cursorBottom += card.offsetHeight + gap;
+    });
   }
 
   /**
@@ -2259,6 +2295,7 @@ class GeometScene {
     } else {
       const legendEl = document.getElementById(`legend-${target}`);
       if (legendEl) legendEl.classList.toggle('hidden', !visible);
+      this._restackLegendCards();
     }
   }
 

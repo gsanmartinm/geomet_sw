@@ -66,6 +66,7 @@ class GeometApp {
     this.initDrillPlannerListeners();
     this.initConsoleControl();
     this.initDraggableLegends();
+    this.initThemeToggle();
 
     this.logConsole('info', '[Sistema] Inicializando pruebas de validación automatizadas...');
     this.runAutomatedTests();
@@ -88,6 +89,11 @@ class GeometApp {
         // No arrastrar si el click fue sobre el botón de cerrar
         if (e.target.closest('.btn-icon')) return;
         e.preventDefault();
+
+        // A partir de este punto el usuario eligió la posición a mano —
+        // scene.js._restackLegendCards() ya no debe volver a moverla sola
+        // cuando otra leyenda cambie de tamaño/visibilidad (ver ahí).
+        card.dataset.userPositioned = 'true';
 
         const container = card.offsetParent || card.parentElement;
         const containerRect = container.getBoundingClientRect();
@@ -566,15 +572,18 @@ class GeometApp {
     this.drillPlannerPicking = !this.drillPlannerPicking;
     const btn = document.getElementById('btn-planner-start-pick');
     const info = document.getElementById('planner-picking-info');
+    const badge = document.getElementById('planner-picking-badge');
 
     if (this.drillPlannerPicking) {
       if (btn) { btn.innerText = 'Cancelar (esperando click en el visor)'; btn.style.background = 'var(--accent-red)'; }
       if (info) info.innerText = 'Modo activo: hacé click en el visor 3D para ubicar el collar. Volvé a apretar este botón para cancelar.';
       if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = 'crosshair';
+      if (badge) badge.classList.remove('hidden');
     } else {
       if (btn) { btn.innerText = 'Click para Definir Collar'; btn.style.background = ''; }
       if (info) info.innerText = 'Hacé click en el visor 3D (funciona en Planta o en una Sección de Modo Vista) para ubicar el collar. Si hay una superficie DXF cargada (ej. topografía), el collar se ajusta automáticamente a ella.';
       if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = '';
+      if (badge) badge.classList.add('hidden');
     }
   }
 
@@ -606,11 +615,13 @@ class GeometApp {
       collar = this.scene.pickOnHorizontalPlaneAtNDC(ndcX, ndcY, referenceZ);
       if (collar) {
         this.logConsole('warn', 'Planificador: no se encontró una superficie DXF donde apoyar el collar. Se ubicó en un plano de referencia — ajustá la cota Z manualmente si hace falta.');
+        this.showToast('warn', 'No hay una superficie DXF donde apoyar el collar — se usó un plano de referencia. Ajustá Z a mano si hace falta.');
       }
     }
 
     if (!collar) {
       this.logConsole('error', 'Planificador: no se pudo determinar una posición de collar en ese punto.');
+      this.showToast('error', 'No se pudo determinar una posición de collar en ese punto.');
       return;
     }
 
@@ -629,6 +640,8 @@ class GeometApp {
     this.drillPlannerPicking = false;
     const btn = document.getElementById('btn-planner-start-pick');
     if (btn) { btn.innerText = 'Click para Definir Collar'; btn.style.background = ''; }
+    const badge = document.getElementById('planner-picking-badge');
+    if (badge) badge.classList.add('hidden');
     canvas.style.cursor = '';
 
     this.previewProposedHole();
@@ -691,6 +704,7 @@ class GeometApp {
     this.renderProposedHolesList();
     this.updatePlannerNextHoleIdLabel();
     this.logConsole('success', `Planificador: sondaje propuesto agregado (${hole.holeId}).`);
+    this.showToast('success', `Sondaje ${hole.holeId} agregado.`);
   }
 
   updatePlannerNextHoleIdLabel() {
@@ -762,8 +776,10 @@ class GeometApp {
     try {
       this.drillPlanner.exportToExcel();
       this.logConsole('success', `Planificador: ${this.drillPlanner.holes.length} sondaje(s) propuesto(s) exportado(s) a Excel.`);
+      this.showToast('success', `${this.drillPlanner.holes.length} sondaje(s) exportado(s) a Excel.`);
     } catch (err) {
       this.logConsole('error', `Planificador: error al exportar a Excel — ${err.message}`);
+      this.showToast('error', `Error al exportar a Excel: ${err.message}`);
     }
   }
 
@@ -876,6 +892,40 @@ class GeometApp {
     }
   }
 
+  /**
+   * Tema claro/oscuro del chrome de la app (sidebars, consola, modal — el
+   * visor 3D se mantiene oscuro en los dos temas, ver comentario en
+   * index.css). Preferencia persistida en localStorage para no tener que
+   * re-elegirla cada vez que se abre la app.
+   */
+  initThemeToggle() {
+    const btn = document.getElementById('btn-toggle-theme');
+    if (!btn) return;
+
+    const applyTheme = (light) => {
+      document.body.classList.toggle('light-mode', light);
+      document.body.classList.toggle('dark-mode', !light);
+      btn.innerText = light ? '🌙 Tema Oscuro' : '☀ Tema Claro';
+    };
+
+    let savedPreference = null;
+    try {
+      savedPreference = localStorage.getItem('geomet-theme');
+    } catch (e) {
+      // localStorage puede no estar disponible (modo privado, política del
+      // navegador) — la app sigue funcionando, sólo no persiste la elección.
+    }
+    applyTheme(savedPreference === 'light');
+
+    btn.addEventListener('click', () => {
+      const nowLight = !document.body.classList.contains('light-mode');
+      applyTheme(nowLight);
+      try {
+        localStorage.setItem('geomet-theme', nowLight ? 'light' : 'dark');
+      } catch (e) { /* ver comentario arriba */ }
+    });
+  }
+
   logConsole(type, message, file = 'Sistema', line = '') {
     const consoleBody = document.getElementById('console-messages');
     const warnBadge = document.getElementById('console-warn-count');
@@ -903,7 +953,47 @@ class GeometApp {
       warnBadge.innerText = parseInt(warnBadge.innerText) + 1;
     } else if (type === 'error') {
       errBadge.innerText = parseInt(errBadge.innerText) + 1;
+
+      // Auto-expandir la consola ante un error nuevo si estaba minimizada
+      // (empieza así por defecto, para dejarle más alto al visor) — un
+      // error es justo el caso en el que no querés depender de que el
+      // usuario se acuerde de abrirla a revisar.
+      const consoleEl = document.getElementById('validation-console');
+      const btnToggle = document.getElementById('btn-toggle-console');
+      if (consoleEl && consoleEl.classList.contains('minimized')) {
+        consoleEl.classList.remove('minimized');
+        if (btnToggle) btnToggle.innerText = 'Minimizar';
+      }
     }
+  }
+
+  /**
+   * Notificación efímera ("toast") para el "acuse de recibo" inmediato de
+   * una acción que el usuario acaba de disparar a propósito (agregar un
+   * sondaje, exportar una vista, guardar/aplicar una vista guardada) — no
+   * reemplaza a logConsole(), que sigue siendo el registro persistente y
+   * detallado: showToast() es sólo la confirmación visible al toque, para
+   * cuando la consola de abajo está minimizada o el usuario tiene la
+   * atención puesta en el visor 3D, no en el panel inferior.
+   */
+  showToast(type, message, duration = 3500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+
+    // Forzar reflow antes de agregar 'show' para que la transición de
+    // entrada (opacity/transform en CSS) se dispare de verdad, en vez de
+    // arrancar ya con la clase puesta (sin animación visible).
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    setTimeout(() => {
+      toast.classList.remove('show');
+      toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, duration);
   }
 
   clearConsole() {
@@ -2655,6 +2745,7 @@ class GeometApp {
     this.savedViews.push(snapshot);
     this.renderSavedViewsList();
     this.logConsole('success', `Vista "${name}" guardada.`);
+    this.showToast('success', `Vista "${name}" guardada.`);
   }
 
   /**
@@ -2727,6 +2818,7 @@ class GeometApp {
 
     this.updateViewModeOrientationSummary();
     this.logConsole('success', `Vista "${snap.name}" aplicada.`);
+    this.showToast('info', `Vista "${snap.name}" aplicada.`);
   }
 
   deleteSavedView(idx) {
@@ -3136,6 +3228,7 @@ class GeometApp {
     document.body.removeChild(a);
 
     this.logConsole('success', 'Vista exportada como PNG.');
+    this.showToast('success', 'Vista exportada como PNG.');
   }
 
   // ==========================================

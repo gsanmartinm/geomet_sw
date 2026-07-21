@@ -29,6 +29,11 @@
       </div>
       <div class="header-actions">
         <button id="btn-generate-synthetic" class="btn btn-outline" title="Genera un dataset masivo para pruebas de rendimiento de 1M-5M bloques">Generar Datos Sintéticos</button>
+        <!-- Tema claro/oscuro: sólo cambia el chrome de la app (sidebars,
+             consola, modal) — el visor 3D se mantiene oscuro en los dos
+             temas, ver comentario en index.css. Preferencia persistida en
+             localStorage — ver initThemeToggle() en app.js. -->
+        <button id="btn-toggle-theme" class="btn btn-outline" title="Cambiar entre tema oscuro y tema claro">☀ Tema Claro</button>
         <div id="connection-status" class="status-indicator online">Listo</div>
       </div>
     </header>
@@ -133,6 +138,16 @@
 
         <!-- Controles flotantes sobre el visor -->
         <div id="viewport-overlay">
+          <!-- Badge de modo activo del Planificador de Sondajes: sólo
+               visible mientras se espera un click en el visor para definir
+               un collar (ver toggleDrillPlannerPicking() en app.js) — se
+               ubica arriba y centrada para que el feedback no dependa de
+               que el usuario esté mirando el sidebar derecho. -->
+          <div id="planner-picking-badge" class="overlay-card planner-picking-badge hidden">
+            <span class="planner-picking-dot"></span>
+            Modo Planificación: click en el visor para definir el collar
+          </div>
+
           <div class="overlay-card fps-counter">
             <span>FPS:</span> <strong id="fps-val">60</strong>
           </div>
@@ -209,6 +224,14 @@
         <div class="sidebar-content">
           <!-- PESTAÑA VISUALIZACIÓN -->
           <div id="tab-viz" class="tab-panel active">
+            <div class="tab-intro">
+              <div class="tab-intro-text">
+                <h3>Visualización</h3>
+                <p>Cómo se dibuja cada capa cargada: modo de render, atributo activo, paleta de colores y leyenda.</p>
+              </div>
+              <span class="tab-help-icon" title="Elegí qué atributo colorea cada capa (Bloques/Sondajes/Muestras) y con qué paleta. La leyenda de cada capa se puede mostrar/ocultar u ocultar por separado, y se puede arrastrar con el mouse dentro del visor.">?</span>
+            </div>
+
             <div class="settings-group">
               <label for="select-render-mode">Modo de Render de Bloques</label>
               <select id="select-render-mode" class="form-control">
@@ -482,6 +505,14 @@
           <!-- PESTAÑA FILTROS & SECCIONES -->
           <div id="tab-filters" class="tab-panel">
 
+            <div class="tab-intro">
+              <div class="tab-intro-text">
+                <h3>Filtros &amp; Secciones</h3>
+                <p>Recortá el modelo a un plano/sección, filtrá por atributo, y creá variables calculadas nuevas.</p>
+              </div>
+              <span class="tab-help-icon" title="4 grupos plegables: Vistas de Sección/Planta (corta el modelo a una cota o sección con espesor configurable), Grilla de Referencia, Filtros por atributo (numérico o categórico, independiente por capa), y Variables Calculadas (atributos nuevos con fórmulas, ej. CUS/CUT).">?</span>
+            </div>
+
             <!-- 1. Vistas de Sección / Planta -->
             <details class="accordion-group" open>
               <summary class="accordion-header"><span>Vistas de Sección / Planta</span></summary>
@@ -663,6 +694,14 @@
           <!-- PESTAÑA VISTAS (planos/secciones exportables) -->
           <div id="tab-views" class="tab-panel">
 
+            <div class="tab-intro">
+              <div class="tab-intro-text">
+                <h3>Vistas</h3>
+                <p>Bloqueá la cámara en un plano técnico y exportá la vista actual como PNG, con anotaciones.</p>
+              </div>
+              <span class="tab-help-icon" title="Modo Vista bloquea la cámara en ortográfica (sin distorsión), alineada al corte activo — con zoom y desplazamiento libres, sin rotación. La exportación a PNG incluye la grilla de referencia y un panel opcional con archivos de origen, filtros aplicados, cota/sección y leyenda de variables. Las vistas armadas se pueden guardar y reaplicar en la misma sesión.">?</span>
+            </div>
+
             <!-- Modo Vista: bloquea la cámara en ortográfica, alineada a la
                  Orientación del Corte configurada en Filtros & Secciones. -->
             <div class="filter-section">
@@ -714,6 +753,14 @@
 
           <!-- PESTAÑA PLANIFICACIÓN DE SONDAJES -->
           <div id="tab-planner" class="tab-panel">
+
+            <div class="tab-intro">
+              <div class="tab-intro-text">
+                <h3>Planificación</h3>
+                <p>Diseñá sondajes propuestos: definí el collar en el visor, la trayectoria, y exportalos a Excel.</p>
+              </div>
+              <span class="tab-help-icon" title="Click para Definir Collar activa el modo de picking: al hacer click en el visor (Planta o una Sección de Modo Vista), el collar se ajusta a la superficie DXF cargada (ej. topografía) o a un plano de referencia si no hay ninguna. Definí azimuth/dip/profundidad, confirmá el sondaje (HOLEID correlativo) y exportá todos los propuestos de la sesión a un archivo Excel.">?</span>
+            </div>
 
             <div class="filter-section">
               <div class="filter-section-title">
@@ -795,8 +842,18 @@
       </aside>
     </main>
 
+    <!-- Notificaciones efímeras ("toast") para acciones puntuales del
+         usuario (agregar sondaje, exportar, guardar vista) — acuse de
+         recibo inmediato que no depende de que la consola de abajo esté
+         visible. Ver showToast() en app.js. -->
+    <div id="toast-container"></div>
+
     <!-- CONSOLA DE VALIDACIONES (BOTTOM) -->
-    <footer id="validation-console">
+    <!-- Empieza minimizada (40px) para dejarle más alto al visor 3D por
+         defecto — se auto-expande sola apenas llega un mensaje de error
+         nuevo (ver logConsole() en app.js), así que no hay que estar
+         revisándola a propósito para enterarse de un problema. -->
+    <footer id="validation-console" class="minimized">
       <div class="console-header">
         <div class="console-title">
           <span>Consola de Importación y Calidad de Datos</span>
@@ -805,7 +862,7 @@
         </div>
         <div class="console-actions">
           <button onclick="app.clearConsole()" class="btn btn-xs btn-outline">Limpiar</button>
-          <button class="btn btn-xs btn-outline" id="btn-toggle-console">Minimizar</button>
+          <button class="btn btn-xs btn-outline" id="btn-toggle-console">Maximizar</button>
         </div>
       </div>
       <div class="console-body" id="console-messages">

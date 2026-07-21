@@ -61,7 +61,11 @@ class DrillPlanner {
       dip,
       depth,
       endPoint,
-      color: color || '#f59e0b',
+      // Violeta (--accent-violet en index.css), reservado para elementos
+      // de DISEÑO/PROPUESTA — deliberadamente distinto de --accent-amber
+      // (usado para warnings en toda la app) para que un sondaje propuesto
+      // nunca se lea como una alerta.
+      color: color || '#a78bfa',
       visible: true,
     };
     this.holes.push(hole);
