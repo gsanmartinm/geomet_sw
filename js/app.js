@@ -2496,6 +2496,12 @@ class GeometApp {
    * _drawAnnotationPanel() para poder calcular el alto del panel antes de
    * dibujar nada.
    */
+  /** Filtro numérico actualmente activo sobre `attrName` en la capa `target`, o null si no hay. */
+  _getActiveNumericFilter(target, attrName) {
+    const list = target === 'blocks' ? this.filters : target === 'drillholes' ? this.dhFilters : this.sampleFilters;
+    return (list || []).find(f => f.type === 'number' && f.attribute === attrName) || null;
+  }
+
   _buildExportAnnotations() {
     const blocks = [];
 
@@ -2534,9 +2540,29 @@ class GeometApp {
             lines.push({ text: `${targetLabels[target]} — ${attrMeta.name}: ${catName}`, swatch: '#' + col.getHexString() });
           });
         } else {
-          const mid = (minVal + maxVal) / 2;
-          const col = this.scene.getColorForValue(mid, minVal, maxVal, paletteName, this.scene.customPaletteColors[target]);
-          lines.push({ text: `${targetLabels[target]} — ${attrMeta.name}: ${minVal.toFixed(2)} a ${maxVal.toFixed(2)}`, swatch: '#' + col.getHexString() });
+          // Rango a mostrar: si hay un filtro numérico activo sobre este
+          // atributo, se usa el rango del filtro (lo que efectivamente queda
+          // visible tras ocultar los puntos fuera de rango); si no, el rango
+          // completo de la escala de color, igual que la leyenda flotante.
+          const activeFilter = this._getActiveNumericFilter(target, attrMeta.name);
+          const rangeMin = activeFilter ? Number(activeFilter.min) : minVal;
+          const rangeMax = activeFilter ? Number(activeFilter.max) : maxVal;
+          lines.push({ text: `${targetLabels[target]} — ${attrMeta.name}: ${rangeMin.toFixed(2)} a ${rangeMax.toFixed(2)}`, header: true });
+
+          // Gradiente de 5 tramos (misma lógica que la leyenda flotante de
+          // la vista principal), para mostrar varios colores en vez de uno
+          // solo. Los valores de cada tramo se reparten en el rango
+          // efectivo (arriba), pero el COLOR de cada tramo se calcula
+          // siempre sobre el dominio real de la escala (minVal/maxVal), así
+          // el swatch coincide con el color que ese valor realmente tiene
+          // en el render.
+          const steps = 5;
+          for (let i = 0; i < steps; i++) {
+            const t = i / (steps - 1);
+            const val = rangeMin + t * (rangeMax - rangeMin);
+            const col = this.scene.getColorForValue(val, minVal, maxVal, paletteName, this.scene.customPaletteColors[target]);
+            lines.push({ text: val.toFixed(2), swatch: '#' + col.getHexString() });
+          }
         }
       });
       if (this.viewAnnotations.dxfLayerNames) {
@@ -2561,7 +2587,7 @@ class GeometApp {
       filterGroups.forEach(g => {
         (g.list || []).forEach(f => {
           const text = f.type === 'number'
-            ? `${g.label} — ${f.attribute}: [${f.min} - ${f.max}]`
+            ? `${g.label} — ${f.attribute}: [${Number(f.min).toFixed(2)} - ${Number(f.max).toFixed(2)}]`
             : `${g.label} — ${f.attribute}: {${(f.lookupNames || f.values).join(', ')}}`;
           lines.push({ text });
         });
@@ -2653,7 +2679,7 @@ class GeometApp {
       block.lines.forEach(line => {
         const maxW = columnWidth - (line.swatch ? swatchReserve : 0);
         this._wrapText(ctx, line.text, maxW).forEach((wt, i) => {
-          measuredLines.push({ text: wt, swatch: i === 0 ? line.swatch : null });
+          measuredLines.push({ text: wt, swatch: i === 0 ? line.swatch : null, header: !!line.header });
         });
       });
       const height = titleHeight + measuredLines.length * lineHeight + blockGap;
@@ -2723,7 +2749,15 @@ class GeometApp {
 
         ctx.font = `400 ${bodyFontPx}px sans-serif`;
         block.lines.forEach(line => {
-          if (line.swatch) {
+          if (line.header) {
+            // Encabezado de un mini-gradiente numérico (atributo + rango
+            // efectivo) — mismo tamaño que el cuerpo pero semi-bold y algo
+            // más claro, para distinguirlo de los tramos de color debajo.
+            ctx.font = `600 ${bodyFontPx}px sans-serif`;
+            ctx.fillStyle = '#cbd5e1';
+            ctx.fillText(line.text, colX, cursorY + lineHeight / 2);
+            ctx.font = `400 ${bodyFontPx}px sans-serif`;
+          } else if (line.swatch) {
             const sw = 11 * dpr;
             ctx.fillStyle = line.swatch;
             ctx.fillRect(colX, cursorY + (lineHeight - sw) / 2, sw, sw);
