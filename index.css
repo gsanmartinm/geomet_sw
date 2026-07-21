@@ -47,8 +47,12 @@
 body.light-mode {
   --bg-primary: hsl(220, 25%, 97%);
   --bg-secondary: hsl(220, 20%, 92%);
-  --bg-panel: hsla(220, 30%, 100%, 0.75);
-  --bg-card: hsla(220, 20%, 100%, 0.9);
+  /* Más opaco que en tema oscuro (0.75 → 0.94): el visor 3D sigue siendo
+     oscuro a propósito (ver comentario más abajo), así que un panel muy
+     transparente encima dejaba pasar ese fondo oscuro y el sidebar se veía
+     grisáceo en vez de claramente claro. */
+  --bg-panel: hsla(220, 30%, 100%, 0.94);
+  --bg-card: hsla(220, 20%, 100%, 0.96);
   --bg-active: hsl(220, 20%, 84%);
 
   --border-color: hsla(220, 15%, 35%, 0.22);
@@ -532,53 +536,17 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
-/* Introducción breve al inicio de cada pestaña del sidebar derecho (qué
-   hace la pestaña, en 1 línea) + ícono "?" con más detalle al pasar el
-   mouse (title nativo, sin JS ni popover que mantener) — mejora la
-   descubribilidad de funciones que no son obvias a primera vista (Modo
-   Vista, Variables Calculadas, Planificación). */
+/* Título simple al inicio de cada pestaña del sidebar derecho. */
 .tab-intro {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-color);
 }
-.tab-intro-text h3 {
+.tab-intro h3 {
   font-family: var(--font-sans);
   font-weight: 700;
   font-size: 0.85rem;
   color: var(--text-main);
-  margin-bottom: 4px;
-}
-.tab-intro-text p {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  line-height: 1.35;
-}
-.tab-help-icon {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-muted);
-  font-family: var(--font-display);
-  font-size: 0.7rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: help;
-  transition: var(--transition-smooth);
-}
-.tab-help-icon:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
 }
 
 /* Notificaciones "toast" — ver showToast() en app.js. Se apilan arriba a

@@ -138,18 +138,6 @@ class GeometApp {
   // MANEJO DE EVENTOS UI
   // ==========================================
   initUIEventListeners() {
-    // Generar Datos Sintéticos
-    const btnSynthetic = document.getElementById('btn-generate-synthetic');
-    if (btnSynthetic) {
-      btnSynthetic.addEventListener('click', () => {
-        const count = prompt("Ingrese cantidad de bloques a generar para prueba de stress:", "1000000");
-        const blockCount = parseInt(count, 10);
-        if (!isNaN(blockCount) && blockCount > 0) {
-          this.generateSyntheticBlocks(blockCount);
-        }
-      });
-    }
-
     // Pestañas Laterales
     const tabButtons = document.querySelectorAll('.tab-btn');
     tabButtons.forEach(btn => {

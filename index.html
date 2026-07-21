@@ -8,7 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="index.css">
+  <!-- Query string "?v=N" al final de cada archivo propio (CSS y JS abajo):
+       obliga al navegador a pedir el archivo de nuevo en vez de servir una
+       copia vieja en caché cuando se actualiza el código — sin esto, un
+       refresh normal (no Ctrl+Shift+R) puede seguir mostrando JS/CSS
+       desactualizado aunque el HTML sí se haya recargado. Subir el número
+       cada vez que cambie index.css o algún js/*.js. -->
+  <link rel="stylesheet" href="index.css?v=2">
   
   <!-- Three.js y OrbitControls CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -28,7 +34,6 @@
         <span class="version-tag">V1 PoC</span>
       </div>
       <div class="header-actions">
-        <button id="btn-generate-synthetic" class="btn btn-outline" title="Genera un dataset masivo para pruebas de rendimiento de 1M-5M bloques">Generar Datos Sintéticos</button>
         <!-- Tema claro/oscuro: sólo cambia el chrome de la app (sidebars,
              consola, modal) — el visor 3D se mantiene oscuro en los dos
              temas, ver comentario en index.css. Preferencia persistida en
@@ -216,20 +221,16 @@
       <aside id="right-sidebar" class="sidebar">
         <div class="sidebar-tabs">
           <button class="tab-btn active" data-tab="tab-viz">Visualización</button>
-          <button class="tab-btn" data-tab="tab-filters">Filtros & Secciones</button>
+          <button class="tab-btn" data-tab="tab-filters">Manipulación</button>
           <button class="tab-btn" data-tab="tab-views">Vistas</button>
-          <button class="tab-btn" data-tab="tab-planner">Planificación</button>
+          <button class="tab-btn" data-tab="tab-planner">Plan Sondajes</button>
         </div>
 
         <div class="sidebar-content">
           <!-- PESTAÑA VISUALIZACIÓN -->
           <div id="tab-viz" class="tab-panel active">
             <div class="tab-intro">
-              <div class="tab-intro-text">
-                <h3>Visualización</h3>
-                <p>Cómo se dibuja cada capa cargada: modo de render, atributo activo, paleta de colores y leyenda.</p>
-              </div>
-              <span class="tab-help-icon" title="Elegí qué atributo colorea cada capa (Bloques/Sondajes/Muestras) y con qué paleta. La leyenda de cada capa se puede mostrar/ocultar u ocultar por separado, y se puede arrastrar con el mouse dentro del visor.">?</span>
+              <h3>Visualización</h3>
             </div>
 
             <div class="settings-group">
@@ -506,11 +507,100 @@
           <div id="tab-filters" class="tab-panel">
 
             <div class="tab-intro">
-              <div class="tab-intro-text">
-                <h3>Filtros &amp; Secciones</h3>
-                <p>Recortá el modelo a un plano/sección, filtrá por atributo, y creá variables calculadas nuevas.</p>
+              <h3>Manipulación</h3>
+            </div>
+
+            <!-- 1. Filtros -->
+            <details class="accordion-group" open>
+              <summary class="accordion-header"><span>Filtros</span></summary>
+              <div class="accordion-body">
+                <!-- Filtros de Atributo — Modelo de Bloques -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Modelo de Bloques</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-blocks">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-blocks" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-blocks" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
+                </div>
+
+                <!-- Filtros de Atributo — Sondajes -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Sondajes</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-drillholes">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-drillholes" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-drillholes" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
+                </div>
+
+                <!-- Filtros de Atributo — Muestras Metalúrgicas -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Filtros — Muestras</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-filter-samples">+ Añadir Filtro</button>
+                  </div>
+                  <div id="filter-builder-samples" class="filter-builder hidden"></div>
+                  <div id="active-filters-list-samples" class="filters-container">
+                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
+                  </div>
+                </div>
               </div>
-              <span class="tab-help-icon" title="4 grupos plegables: Vistas de Sección/Planta (corta el modelo a una cota o sección con espesor configurable), Grilla de Referencia, Filtros por atributo (numérico o categórico, independiente por capa), y Variables Calculadas (atributos nuevos con fórmulas, ej. CUS/CUT).">?</span>
+            </details>
+
+            <!-- 2. Variables Calculadas -->
+            <details class="accordion-group">
+              <summary class="accordion-header"><span>Variables Calculadas</span></summary>
+              <div class="accordion-body">
+                <!-- Variables Calculadas — Modelo de Bloques -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Bloques</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-blocks">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-blocks" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-blocks" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados (ej. CUS / CUT).</div>
+                  </div>
+                </div>
+
+                <!-- Variables Calculadas — Sondajes -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Sondajes</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-drillholes">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-drillholes" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-drillholes" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los ensayos numéricos ya cargados.</div>
+                  </div>
+                </div>
+
+                <!-- Variables Calculadas — Muestras Metalúrgicas -->
+                <div class="filter-section">
+                  <div class="filter-section-title">
+                    <span>Variables Calculadas — Muestras</span>
+                    <button class="btn btn-xs btn-outline" id="btn-add-calc-samples">+ Nueva Variable</button>
+                  </div>
+                  <div id="calc-builder-samples" class="filter-builder hidden"></div>
+                  <div id="active-calc-list-samples" class="filters-container">
+                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+          </div>
+
+          <!-- PESTAÑA VISTAS (planos/secciones exportables) -->
+          <div id="tab-views" class="tab-panel">
+
+            <div class="tab-intro">
+              <h3>Vistas</h3>
             </div>
 
             <!-- 1. Vistas de Sección / Planta -->
@@ -605,106 +695,9 @@
               </div>
             </details>
 
-            <!-- 3. Filtros -->
-            <details class="accordion-group">
-              <summary class="accordion-header"><span>Filtros</span></summary>
-              <div class="accordion-body">
-                <!-- Filtros de Atributo — Modelo de Bloques -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Filtros — Modelo de Bloques</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-filter-blocks">+ Añadir Filtro</button>
-                  </div>
-                  <div id="filter-builder-blocks" class="filter-builder hidden"></div>
-                  <div id="active-filters-list-blocks" class="filters-container">
-                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-                  </div>
-                </div>
-
-                <!-- Filtros de Atributo — Sondajes -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Filtros — Sondajes</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-filter-drillholes">+ Añadir Filtro</button>
-                  </div>
-                  <div id="filter-builder-drillholes" class="filter-builder hidden"></div>
-                  <div id="active-filters-list-drillholes" class="filters-container">
-                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-                  </div>
-                </div>
-
-                <!-- Filtros de Atributo — Muestras Metalúrgicas -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Filtros — Muestras</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-filter-samples">+ Añadir Filtro</button>
-                  </div>
-                  <div id="filter-builder-samples" class="filter-builder hidden"></div>
-                  <div id="active-filters-list-samples" class="filters-container">
-                    <div class="empty-notice">No hay filtros activos. Los datos se visualizan completos.</div>
-                  </div>
-                </div>
-              </div>
-            </details>
-
-            <!-- 4. Variables Calculadas -->
-            <details class="accordion-group">
-              <summary class="accordion-header"><span>Variables Calculadas</span></summary>
-              <div class="accordion-body">
-                <!-- Variables Calculadas — Modelo de Bloques -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Variables Calculadas — Bloques</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-calc-blocks">+ Nueva Variable</button>
-                  </div>
-                  <div id="calc-builder-blocks" class="filter-builder hidden"></div>
-                  <div id="active-calc-list-blocks" class="filters-container">
-                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados (ej. CUS / CUT).</div>
-                  </div>
-                </div>
-
-                <!-- Variables Calculadas — Sondajes -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Variables Calculadas — Sondajes</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-calc-drillholes">+ Nueva Variable</button>
-                  </div>
-                  <div id="calc-builder-drillholes" class="filter-builder hidden"></div>
-                  <div id="active-calc-list-drillholes" class="filters-container">
-                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los ensayos numéricos ya cargados.</div>
-                  </div>
-                </div>
-
-                <!-- Variables Calculadas — Muestras Metalúrgicas -->
-                <div class="filter-section">
-                  <div class="filter-section-title">
-                    <span>Variables Calculadas — Muestras</span>
-                    <button class="btn btn-xs btn-outline" id="btn-add-calc-samples">+ Nueva Variable</button>
-                  </div>
-                  <div id="calc-builder-samples" class="filter-builder hidden"></div>
-                  <div id="active-calc-list-samples" class="filters-container">
-                    <div class="empty-notice">No hay variables calculadas. Creá una en función de los atributos numéricos ya cargados.</div>
-                  </div>
-                </div>
-              </div>
-            </details>
-
-          </div>
-
-          <!-- PESTAÑA VISTAS (planos/secciones exportables) -->
-          <div id="tab-views" class="tab-panel">
-
-            <div class="tab-intro">
-              <div class="tab-intro-text">
-                <h3>Vistas</h3>
-                <p>Bloqueá la cámara en un plano técnico y exportá la vista actual como PNG, con anotaciones.</p>
-              </div>
-              <span class="tab-help-icon" title="Modo Vista bloquea la cámara en ortográfica (sin distorsión), alineada al corte activo — con zoom y desplazamiento libres, sin rotación. La exportación a PNG incluye la grilla de referencia y un panel opcional con archivos de origen, filtros aplicados, cota/sección y leyenda de variables. Las vistas armadas se pueden guardar y reaplicar en la misma sesión.">?</span>
-            </div>
-
             <!-- Modo Vista: bloquea la cámara en ortográfica, alineada a la
-                 Orientación del Corte configurada en Filtros & Secciones. -->
-            <div class="filter-section">
+                 Orientación del Corte configurada arriba en esta misma pestaña. -->
+            <div class="filter-section mt-4">
               <div class="filter-section-title">
                 <span>Modo Vista (Plano / Sección)</span>
                 <label class="switch">
@@ -714,7 +707,7 @@
               </div>
               <span class="info-label" id="view-mode-info">Actívalo para bloquear la cámara en una proyección ortográfica (sin distorsión, como un plano técnico), con zoom y desplazamiento libres pero sin rotación.</span>
               <div class="settings-group" style="margin-top: 10px;">
-                <span class="info-label">Orientación y cota actuales: <strong id="view-mode-orientation-summary">—</strong>. Se ajustan desde la pestaña <em>Filtros & Secciones → Vistas de Sección / Planta</em>.</span>
+                <span class="info-label">Orientación y cota actuales: <strong id="view-mode-orientation-summary">—</strong>. Se ajustan desde "Vistas de Sección / Planta", más arriba en esta pestaña.</span>
               </div>
             </div>
 
@@ -755,11 +748,7 @@
           <div id="tab-planner" class="tab-panel">
 
             <div class="tab-intro">
-              <div class="tab-intro-text">
-                <h3>Planificación</h3>
-                <p>Diseñá sondajes propuestos: definí el collar en el visor, la trayectoria, y exportalos a Excel.</p>
-              </div>
-              <span class="tab-help-icon" title="Click para Definir Collar activa el modo de picking: al hacer click en el visor (Planta o una Sección de Modo Vista), el collar se ajusta a la superficie DXF cargada (ej. topografía) o a un plano de referencia si no hay ninguna. Definí azimuth/dip/profundidad, confirmá el sondaje (HOLEID correlativo) y exportá todos los propuestos de la sesión a un archivo Excel.">?</span>
+              <h3>Plan Sondajes</h3>
             </div>
 
             <div class="filter-section">
@@ -992,15 +981,15 @@
   </div>
 
   <!-- Scripts del Prototipo GeoMet -->
-  <script src="js/presets.js"></script>
-  <script src="js/octree.js"></script>
-  <script src="js/formula-eval.js"></script>
+  <script src="js/presets.js?v=2"></script>
+  <script src="js/octree.js?v=2"></script>
+  <script src="js/formula-eval.js?v=2"></script>
   <!-- dxf-parser.js ya no se carga aquí: el parseo de DXF corre dentro del
        Web Worker (worker-parser.js lo importa vía importScripts), no en el
        hilo principal — ver runDXFImport() en importer.js. -->
-  <script src="js/scene.js"></script>
-  <script src="js/importer.js"></script>
-  <script src="js/drill-planner.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/scene.js?v=2"></script>
+  <script src="js/importer.js?v=2"></script>
+  <script src="js/drill-planner.js?v=2"></script>
+  <script src="js/app.js?v=2"></script>
 </body>
 </html>
