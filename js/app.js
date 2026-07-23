@@ -1002,7 +1002,12 @@ class GeometApp {
     document.getElementById('connection-status').className = 'status-indicator';
     document.getElementById('connection-status').innerText = 'Procesando...';
     
-    this.worker = new Worker('js/worker-parser.js');
+    // ?v=3: mismo mecanismo de cache-busting que index.html (ver comentario
+    // ahí) — sin esto, el navegador podía seguir sirviendo una copia vieja
+    // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
+    // la app ya se hubiera actualizado, porque los Workers también cachean
+    // su script por URL exacta.
+    this.worker = new Worker('js/worker-parser.js?v=3');
     
     const t0 = performance.now();
     
