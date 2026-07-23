@@ -142,6 +142,14 @@ function detectSeparator(line) {
   }
   if (semicolons > commas && semicolons > tabs) return ';';
   if (tabs > commas && tabs > semicolons) return '\t';
+  if (commas === 0 && semicolons === 0 && tabs === 0) {
+    // Sin delimitadores clásicos: común en archivos .asc de modelos de
+    // bloques (Datamine/Vulcan/Surpac), que suelen venir separados por
+    // uno o más espacios en blanco con ancho variable. Si la línea trae
+    // más de un "token" separado por espacios, se asume delimitador ' '.
+    const tokens = line.trim().split(/\s+/);
+    if (tokens.length > 1) return ' ';
+  }
   return ',';
 }
 
@@ -157,6 +165,12 @@ function parseCSVLines(file, startRow, callback) {
   
   // Función para parsear una línea CSV respetando comillas y delimitador dinámico
   function parseCSVLine(line, sep) {
+    // Delimitador por espacios (típico de .asc de modelos de bloques): ancho
+    // variable, sin soporte de comillas.
+    if (sep === ' ') {
+      return line.trim().split(/\s+/);
+    }
+
     const result = [];
     let cur = "";
     let inQuotes = false;
@@ -207,8 +221,12 @@ function getCSVHeaders(file, headerRow) {
   const headerLine = lines[headerRow - 1] || "";
   
   const separator = detectSeparator(headerLine);
-  
+
   // Parseo rápido de la línea de headers usando el delimitador detectado
+  if (separator === ' ') {
+    return headerLine.trim().split(/\s+/);
+  }
+
   const headers = [];
   let cur = "";
   let inQuotes = false;
@@ -646,6 +664,53 @@ function parseDrillholes(payload) {
 // ==========================================
 // PROCESAMIENTO DE MODELO DE BLOQUES
 // ==========================================
+// ==========================================
+// FILTRO PREVIO A LA CARGA (Modelo de Bloques)
+// ==========================================
+/**
+ * Evalúa una única condición de filtro previo contra el valor crudo de una
+ * columna. Si ambos lados (campo y valor de referencia) son numéricos, se
+ * compara numéricamente (caso típico: leyes como CUT > 0.2); si no, se
+ * compara como texto normalizado (útil para litologías/categorías), donde
+ * solo igualdad/desigualdad tienen sentido — los operadores de orden (>, >=,
+ * <, <=) no descartan la fila en ese caso.
+ */
+function evaluatePrefilterCondition(rawField, operator, rawValue) {
+  const fieldNum = parseFloat(cleanNumericString(rawField));
+  const valNum = parseFloat(cleanNumericString(rawValue));
+  const bothNumeric = !isNaN(fieldNum) && !isNaN(valNum);
+
+  if (bothNumeric) {
+    switch (operator) {
+      case '>': return fieldNum > valNum;
+      case '>=': return fieldNum >= valNum;
+      case '<': return fieldNum < valNum;
+      case '<=': return fieldNum <= valNum;
+      case '=': return fieldNum === valNum;
+      case '!=': return fieldNum !== valNum;
+      default: return true;
+    }
+  }
+
+  const fieldStr = (rawField === undefined || rawField === null ? '' : rawField).toString().trim().toLowerCase();
+  const valStr = (rawValue === undefined || rawValue === null ? '' : rawValue).toString().trim().toLowerCase();
+  switch (operator) {
+    case '=': return fieldStr === valStr;
+    case '!=': return fieldStr !== valStr;
+    default: return true; // >,>=,<,<= no aplican a texto: no descarta la fila
+  }
+}
+
+/** Devuelve true si la fila (array de campos crudos) cumple TODAS las condiciones del filtro previo. */
+function rowPassesPrefilters(fields, prefilters) {
+  if (!prefilters || prefilters.length === 0) return true;
+  for (let i = 0; i < prefilters.length; i++) {
+    const f = prefilters[i];
+    if (!evaluatePrefilterCondition(fields[f.index], f.operator, f.value)) return false;
+  }
+  return true;
+}
+
 function parseBlocks(payload) {
   const { file, mappings, options } = payload;
   const startRow = options.startRow || 2;
@@ -653,26 +718,40 @@ function parseBlocks(payload) {
   const errors = [];
   
   postMessage({ type: 'progress', percent: 10, message: 'Preparando importación de modelo de bloques...' });
-  
-  // Contar filas totales para dimensionar los arrays tipados
+
+  const prefilters = mappings.prefilters || [];
+
+  // Contar filas totales para dimensionar los arrays tipados. Si hay filtro
+  // previo, se cuentan solo las filas que lo cumplen: así los TypedArrays se
+  // reservan del tamaño exacto de lo que realmente se va a cargar, en vez
+  // del tamaño del archivo completo — esto es lo que reduce el uso de RAM.
   let totalRows = 0;
+  let totalRawRows = 0;
   try {
-    parseCSVLines(file, startRow, () => {
-      totalRows++;
+    parseCSVLines(file, startRow, (fields) => {
+      totalRawRows++;
+      if (rowPassesPrefilters(fields, prefilters)) totalRows++;
     });
   } catch (err) {
     errors.push({ msg: `Error leyendo el archivo para preconteo: ${err.message}` });
     postMessage({ type: 'error', errors, warnings });
     return;
   }
-  
+
   if (totalRows === 0) {
-    errors.push({ msg: 'El archivo de bloques no contiene registros de datos.' });
+    const msg = prefilters.length > 0
+      ? 'Ninguna fila del archivo cumple las condiciones del filtro previo definido.'
+      : 'El archivo de bloques no contiene registros de datos.';
+    errors.push({ msg });
     postMessage({ type: 'error', errors, warnings });
     return;
   }
-  
-  postMessage({ type: 'progress', percent: 20, message: `Filas detectadas: ${totalRows}. Dimensionando memoria de GPU simulada...` });
+
+  if (prefilters.length > 0) {
+    postMessage({ type: 'progress', percent: 15, message: `Filtro previo aplicado: ${totalRows.toLocaleString()} de ${totalRawRows.toLocaleString()} filas cumplen las condiciones (${prefilters.map(f => `${f.name} ${f.operator} ${f.value}`).join(' Y ')}).` });
+  }
+
+  postMessage({ type: 'progress', percent: 20, message: `Filas a cargar: ${totalRows.toLocaleString()}. Dimensionando memoria de GPU simulada...` });
   
   // Reservar memoria en arrays planos (TypedArrays)
   // Posiciones: X, Y, Z por cada bloque -> totalRows * 3
@@ -711,6 +790,8 @@ function parseBlocks(payload) {
   
   try {
     parseCSVLines(file, startRow, (fields, lineIdx) => {
+      if (!rowPassesPrefilters(fields, prefilters)) return;
+
       const x = parseFloat(cleanNumericString(fields[mappings.x]));
       const y = parseFloat(cleanNumericString(fields[mappings.y]));
       const z = parseFloat(cleanNumericString(fields[mappings.z]));

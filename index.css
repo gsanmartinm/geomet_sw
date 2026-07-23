@@ -1091,6 +1091,38 @@ input:checked + .slider:before {
   gap: 8px;
 }
 
+/* Filtro Previo a la Carga (importador de Modelo de Bloques): filas
+   agregables/removibles de condición columna/operador/valor. */
+.prefilter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.prefilter-row .prefilter-col-select {
+  flex: 2;
+}
+.prefilter-row .prefilter-op-select {
+  flex: 0 0 64px;
+}
+.prefilter-row .prefilter-val-input {
+  flex: 1;
+}
+.btn-remove-prefilter-row {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 6px;
+  transition: var(--transition-smooth);
+}
+.btn-remove-prefilter-row:hover {
+  color: var(--accent-red);
+}
+
 /* Constructor de Filtros (por atributo, numérico o categórico) */
 .filter-builder {
   background-color: rgba(0, 0, 0, 0.25);

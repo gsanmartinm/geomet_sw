@@ -964,6 +964,18 @@
             </table>
           </div>
 
+          <!-- Filtro Previo a la Carga (solo Modelo de Bloques): descarta filas
+               antes de reservar memoria, para reducir el uso de RAM al
+               importar archivos muy grandes (ej. CUT > 0.2). -->
+          <div class="filter-section mt-3 hidden" id="block-prefilter-section">
+            <div class="step-title-row">
+              <h4>Filtro Previo a la Carga (opcional)</h4>
+            </div>
+            <p class="mapping-help">Solo se cargarán las filas que cumplan todas las condiciones definidas. Útil para reducir el uso de RAM en archivos de modelos de bloques muy grandes (ej. CUT &gt; 0.2).</p>
+            <div id="block-prefilter-rows"></div>
+            <button type="button" class="btn btn-xs btn-outline mt-2" id="btn-add-prefilter-row">+ Agregar Condición</button>
+          </div>
+
           <!-- Vista Previa de Datos -->
           <div class="preview-title mt-3">Vista Previa del Archivo (Primeras 5 filas)</div>
           <div class="preview-table-container">

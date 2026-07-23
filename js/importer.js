@@ -140,9 +140,9 @@ class GeometImporter {
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
       startRowGroup.classList.remove('hidden');
-      document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV de Bloques";
-      document.getElementById('csv-file-input').accept = ".csv,.txt";
-      document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo CSV aquí o haz clic para buscar";
+      document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV/ASC de Bloques";
+      document.getElementById('csv-file-input').accept = ".csv,.txt,.asc";
+      document.getElementById('drop-msg-text').innerText = "Arrastre su archivo CSV o ASC aquí o haga clic para buscar";
     }
 
     this.updateModalButtons();
@@ -225,10 +225,24 @@ class GeometImporter {
     }
     if (semicolons > commas && semicolons > tabs) return ';';
     if (tabs > commas && tabs > semicolons) return '\t';
+    if (commas === 0 && semicolons === 0 && tabs === 0) {
+      // Sin delimitadores clásicos: común en archivos .asc de modelos de
+      // bloques (Datamine/Vulcan/Surpac), que suelen venir separados por
+      // uno o más espacios en blanco con ancho variable. Si la línea trae
+      // más de un "token" separado por espacios, se asume delimitador ' '.
+      const tokens = line.trim().split(/\s+/);
+      if (tokens.length > 1) return ' ';
+    }
     return ',';
   }
 
   parseCSVLine(line, separator = ',') {
+    // Delimitador por espacios: ancho variable, sin soporte de comillas
+    // (los .asc de modelos de bloques casi nunca traen campos entrecomillados).
+    if (separator === ' ') {
+      return line.trim().split(/\s+/);
+    }
+
     const result = [];
     let cur = "";
     let inQuotes = false;
@@ -323,7 +337,14 @@ class GeometImporter {
   generateMappingUI() {
     const tbody = document.getElementById('mapping-rows');
     tbody.innerHTML = "";
-    
+
+    // El filtro previo a la carga es exclusivo del importador de Modelo de
+    // Bloques; se oculta y limpia por defecto y solo se rearma más abajo
+    // si activeType === 'blocks'.
+    const prefilterSection = document.getElementById('block-prefilter-section');
+    prefilterSection.classList.add('hidden');
+    document.getElementById('block-prefilter-rows').innerHTML = '';
+
     if (this.activeType === 'blocks') {
       const headers = this.detectedHeaders.blocks;
       
@@ -381,6 +402,7 @@ class GeometImporter {
         tbody.appendChild(row);
       });
 
+      this.initPrefilterSection(headers);
       this.generatePreviewTable('blocks');
 
     } else if (this.activeType === 'drillholes') {
@@ -557,6 +579,83 @@ class GeometImporter {
     });
   }
 
+  // ==========================================
+  // FILTRO PREVIO A LA CARGA (solo Modelo de Bloques)
+  // ==========================================
+  /**
+   * Muestra la sección de filtro previo y la deja lista con una primera
+   * condición vacía. Se llama cada vez que se genera el mapeo de un archivo
+   * de Modelo de Bloques (headers ya detectados en ese momento).
+   */
+  initPrefilterSection(headers) {
+    const section = document.getElementById('block-prefilter-section');
+    section.classList.remove('hidden');
+
+    this._prefilterHeaders = headers;
+    document.getElementById('block-prefilter-rows').innerHTML = '';
+    this.addPrefilterRow();
+
+    // Reemplazamos el botón por un clon para no acumular listeners si el
+    // usuario reabre el modal o vuelve a mapear el mismo archivo varias veces.
+    const btnAdd = document.getElementById('btn-add-prefilter-row');
+    const freshBtn = btnAdd.cloneNode(true);
+    btnAdd.parentNode.replaceChild(freshBtn, btnAdd);
+    freshBtn.addEventListener('click', () => this.addPrefilterRow());
+  }
+
+  /** Agrega una fila de condición (columna/operador/valor) al filtro previo. */
+  addPrefilterRow() {
+    const rowsContainer = document.getElementById('block-prefilter-rows');
+    const headers = this._prefilterHeaders || [];
+
+    const row = document.createElement('div');
+    row.className = 'prefilter-row';
+    row.innerHTML = `
+      <select class="form-control-sm prefilter-col-select">
+        ${headers.map((h, idx) => `<option value="${idx}">${h}</option>`).join('')}
+      </select>
+      <select class="form-control-sm prefilter-op-select">
+        <option value=">">&gt;</option>
+        <option value=">=">&gt;=</option>
+        <option value="<">&lt;</option>
+        <option value="<=">&lt;=</option>
+        <option value="=">=</option>
+        <option value="!=">&ne;</option>
+      </select>
+      <input type="text" class="form-control-sm prefilter-val-input" placeholder="Valor (ej. 0.2)">
+      <button type="button" class="btn-remove-prefilter-row" title="Quitar condición">&times;</button>
+    `;
+    row.querySelector('.btn-remove-prefilter-row').addEventListener('click', () => row.remove());
+    rowsContainer.appendChild(row);
+  }
+
+  /**
+   * Recolecta las condiciones de filtro previo definidas por el usuario.
+   * Las filas con el valor vacío se ignoran silenciosamente (no bloquean el
+   * import ni descartan filas).
+   */
+  collectPrefilters() {
+    const rows = document.querySelectorAll('#block-prefilter-rows .prefilter-row');
+    const filters = [];
+    rows.forEach(row => {
+      const colSelect = row.querySelector('.prefilter-col-select');
+      const opSelect = row.querySelector('.prefilter-op-select');
+      const valInput = row.querySelector('.prefilter-val-input');
+      if (!colSelect || !colSelect.options.length) return;
+
+      const rawVal = valInput.value.trim();
+      if (rawVal === '') return;
+
+      filters.push({
+        index: parseInt(colSelect.value),
+        name: colSelect.options[colSelect.selectedIndex].text,
+        operator: opSelect.value,
+        value: rawVal
+      });
+    });
+    return filters;
+  }
+
   guessHeader(field, header) {
     if (!header || !field) return false;
     const h = header.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -713,12 +812,18 @@ class GeometImporter {
         });
       });
 
+      // Filtro previo a la carga: filas que no cumplan TODAS las condiciones
+      // se descartan antes de reservar memoria (ver parseBlocks() en
+      // worker-parser.js), para reducir el uso de RAM en archivos grandes.
+      const prefilters = this.collectPrefilters();
+
       const payload = {
         file: this.modalFiles.blocks,
         mappings: {
           x: xCol, y: yCol, z: zCol,
           dx: dxCol, dy: dyCol, dz: dzCol,
-          attributes
+          attributes,
+          prefilters
         },
         options: {
           startRow,
