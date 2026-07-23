@@ -153,16 +153,42 @@ function detectSeparator(line) {
   return ',';
 }
 
-function parseCSVLines(file, startRow, callback) {
+// Tamaño de trozo para lectura en streaming — mismo valor ya validado con
+// DXF_CHUNK_SIZE (ver readAndParseDxfChunked()) para archivos de cientos de
+// MB / varios GB.
+const CSV_CHUNK_SIZE = 32 * 1024 * 1024;
+
+/**
+ * Lee y parsea un archivo CSV/ASC línea por línea SIN cargarlo completo en
+ * memoria de una sola vez.
+ *
+ * Antes, esta función hacía `reader.readAsText(file)` con el archivo
+ * completo: arma un único string en memoria con TODO el archivo. Para un
+ * modelo de bloques de ~2GB, FileReaderSync.readAsText() puede fallar
+ * directamente (NotReadableError — "The requested file could not be read,
+ * typically due to permission problems...", un mensaje engañoso: el motivo
+ * real es que el navegador no logra reservar un bloque contiguo de memoria
+ * para un string de ese tamaño, no un problema real de permisos) o, si
+ * llega a completarse, duplicar el uso de RAM del archivo entero solo para
+ * poder leerlo — justo lo opuesto a lo que busca el filtro previo a la
+ * carga. Este es el mismo problema (y la misma solución) ya resuelto para
+ * DXF en readAndParseDxfChunked(): leer en trozos pequeños con
+ * file.slice()+readAsText() y ensamblar líneas completas a partir de los
+ * trozos, sin retener nunca más que el trozo actual (~32MB) en memoria.
+ *
+ * onProgress(bytesRead, totalBytes) es opcional — usado por parseBlocks()
+ * para reportar avance en archivos grandes durante el preconteo y la carga.
+ */
+function parseCSVLines(file, startRow, callback, onProgress) {
   const reader = new FileReaderSync();
-  const text = reader.readAsText(file);
-  const len = text.length;
-  let pos = 0;
+  const total = file.size;
+  let offset = 0;
+  let leftover = '';
   let lineIdx = 0;
-  
+
   let separator = ',';
   let detected = false;
-  
+
   // Función para parsear una línea CSV respetando comillas y delimitador dinámico
   function parseCSVLine(line, sep) {
     // Delimitador por espacios (típico de .asc de modelos de bloques): ancho
@@ -189,24 +215,46 @@ function parseCSVLines(file, startRow, callback) {
     return result;
   }
 
-  while (pos < len) {
-    let nextNewline = text.indexOf('\n', pos);
-    if (nextNewline === -1) nextNewline = len;
-    
-    const line = text.substring(pos, nextNewline).trim();
-    pos = nextNewline + 1;
-    
+  function consumeLine(rawLine) {
+    const line = rawLine.trim();
     lineIdx++;
-    if (lineIdx < startRow) continue;
-    if (!line) continue;
-    
+    if (lineIdx < startRow) return;
+    if (!line) return;
+
     if (!detected) {
       separator = detectSeparator(line);
       detected = true;
     }
-    
+
     const fields = parseCSVLine(line, separator);
     callback(fields, lineIdx);
+  }
+
+  // Archivo vacío: nada que leer.
+  if (total === 0) return;
+
+  while (offset < total) {
+    const end = Math.min(offset + CSV_CHUNK_SIZE, total);
+    const blob = file.slice(offset, end);
+    const chunkText = reader.readAsText(blob);
+
+    const combined = leftover + chunkText;
+    const parts = combined.split(/\r?\n/);
+    // La última parte puede estar incompleta (el trozo no terminó justo en
+    // un salto de línea); se guarda para unirla con el próximo trozo.
+    leftover = parts.pop();
+
+    for (let j = 0; j < parts.length; j++) {
+      consumeLine(parts[j]);
+    }
+
+    offset = end;
+    if (onProgress) onProgress(offset, total);
+  }
+
+  // Última línea (lo que quedó pendiente tras el último trozo)
+  if (leftover.length > 0) {
+    consumeLine(leftover);
   }
 }
 
@@ -731,6 +779,12 @@ function parseBlocks(payload) {
     parseCSVLines(file, startRow, (fields) => {
       totalRawRows++;
       if (rowPassesPrefilters(fields, prefilters)) totalRows++;
+    }, (bytesRead, totalBytes) => {
+      // Preconteo por trozos: en archivos de varios GB esta pasada por sí
+      // sola puede tardar, así que se informa avance en base a MB leídos
+      // (10% -> 20% de la barra total) en vez de dejar la UI sin novedades.
+      const pct = Math.floor(10 + (bytesRead / totalBytes) * 10);
+      postMessage({ type: 'progress', percent: pct, message: `Preconteo: ${(bytesRead / 1024 / 1024).toFixed(0)} MB de ${(totalBytes / 1024 / 1024).toFixed(0)} MB leídos...` });
     });
   } catch (err) {
     errors.push({ msg: `Error leyendo el archivo para preconteo: ${err.message}` });
@@ -849,16 +903,17 @@ function parseBlocks(payload) {
       });
       
       blockIdx++;
-      
-      // Reportar progreso cada 100k bloques
-      if (blockIdx % 100000 === 0) {
-        const percent = Math.floor(30 + (blockIdx / totalRows) * 60);
-        postMessage({
-          type: 'progress',
-          percent: percent,
-          message: `Codificando bloque ${blockIdx.toLocaleString()} de ${totalRows.toLocaleString()}...`
-        });
-      }
+    }, (bytesRead, totalBytes) => {
+      // Progreso por MB leídos (30% -> 90%) en vez de por cantidad de
+      // bloques codificados: con un filtro previo muy selectivo, blockIdx
+      // puede avanzar mucho más lento que la lectura del archivo, y el
+      // usuario necesita ver que el proceso sigue vivo igual.
+      const percent = Math.floor(30 + (bytesRead / totalBytes) * 60);
+      postMessage({
+        type: 'progress',
+        percent: percent,
+        message: `Codificando modelo de bloques: ${(bytesRead / 1024 / 1024).toFixed(0)} MB de ${(totalBytes / 1024 / 1024).toFixed(0)} MB leídos (${blockIdx.toLocaleString()} bloques cargados)...`
+      });
     });
   } catch (err) {
     errors.push({ msg: `Error fatal parseando Bloques: ${err.message}` });
