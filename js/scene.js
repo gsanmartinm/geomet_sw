@@ -667,13 +667,44 @@ class GeometScene {
   // ==========================================
   // CONFIGURACIÓN DE VISTAS CÁMARA
   // ==========================================
-  // Guarda y obtiene los bounds unificados de bloques + sondajes cargados
+  // Guarda y obtiene los bounds unificados de bloques + sondajes + muestras
+  // + superficies DXF cargadas (ver getDxfBounds() para el aporte de DXF).
   setDataBounds(bounds) {
     this._dataBounds = bounds;
   }
 
   getDataBounds() {
     return this._dataBounds;
+  }
+
+  /**
+   * Bounds actuales de TODAS las superficies/líneas DXF cargadas (this.dxfGroup),
+   * usando Box3.setFromObject de Three.js sobre la geometría ya construida —
+   * así siempre refleja el estado real (capas agregadas o eliminadas), sin
+   * tener que llevar la cuenta manualmente en paralelo.
+   *
+   * BUG que esto corrige: antes, _dataBounds (el bounds "unificado" que usan
+   * el botón Home/Restablecer Vista, Vista Superior/Frontal/Lateral y sobre
+   * todo "Modo Vista" — ver enterViewMode(), que arma un frustum ORTOGRÁFICO
+   * con límites duros calculados directamente de _dataBounds) solo se
+   * calculaba a partir de Bloques + Sondajes + Muestras. Una superficie DXF
+   * que se extendiera más allá de esos límites (algo común: un diseño de
+   * pit/botadero suele abarcar más área que el modelo de bloques minado)
+   * quedaba, literalmente, fuera del frustum en Modo Vista — no "lejos" o
+   * "chica", sino recortada por completo y por lo tanto invisible, aunque el
+   * import hubiera sido 100% exitoso. Ver loadDxfData()/loadBlockData()/
+   * loadDrillholeData()/loadSamplesData() en app.js, que ahora fusionan este
+   * bounds junto con el resto.
+   */
+  getDxfBounds() {
+    if (Object.keys(this.dxfMeshes).length === 0) return null;
+    const box = new THREE.Box3().setFromObject(this.dxfGroup);
+    if (box.isEmpty()) return null;
+    return {
+      minX: box.min.x, maxX: box.max.x,
+      minY: box.min.y, maxY: box.max.y,
+      minZ: box.min.z, maxZ: box.max.z
+    };
   }
 
   resetCamera() {

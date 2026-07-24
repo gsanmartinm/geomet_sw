@@ -14,7 +14,7 @@
        refresh normal (no Ctrl+Shift+R) puede seguir mostrando JS/CSS
        desactualizado aunque el HTML sí se haya recargado. Subir el número
        cada vez que cambie index.css o algún js/*.js. -->
-  <link rel="stylesheet" href="index.css?v=4">
+  <link rel="stylesheet" href="index.css?v=5">
   
   <!-- Three.js y OrbitControls CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -35,7 +35,7 @@
              V1.0001 -> V1.0002), para que de un vistazo se sepa en qué
              actualización va la app. Antes de hacer cambios, leer el valor
              actual acá mismo y usar el siguiente correlativo al terminar. -->
-        <span class="version-tag">V1.0001</span>
+        <span class="version-tag">V1.0002</span>
       </div>
       <div class="header-actions">
         <!-- Tema claro/oscuro: sólo cambia el chrome de la app (sidebars,
@@ -997,15 +997,15 @@
   </div>
 
   <!-- Scripts del Prototipo GeoMet -->
-  <script src="js/presets.js?v=4"></script>
-  <script src="js/octree.js?v=4"></script>
-  <script src="js/formula-eval.js?v=4"></script>
+  <script src="js/presets.js?v=5"></script>
+  <script src="js/octree.js?v=5"></script>
+  <script src="js/formula-eval.js?v=5"></script>
   <!-- dxf-parser.js ya no se carga aquí: el parseo de DXF corre dentro del
        Web Worker (worker-parser.js lo importa vía importScripts), no en el
        hilo principal — ver runDXFImport() en importer.js. -->
-  <script src="js/scene.js?v=4"></script>
-  <script src="js/importer.js?v=4"></script>
-  <script src="js/drill-planner.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/scene.js?v=5"></script>
+  <script src="js/importer.js?v=5"></script>
+  <script src="js/drill-planner.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

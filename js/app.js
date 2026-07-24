@@ -1166,6 +1166,7 @@ class GeometApp {
     if (this.samplesData) {
       b = this._extendBounds(b, this.samplesData.bounds);
     }
+    b = this._extendBounds(b, this.scene.getDxfBounds());
     this.scene.setDataBounds(b);
     this.scene.focusOnBounds(b);
     this.triggerBlockRefresh();
@@ -1258,13 +1259,14 @@ class GeometApp {
       
       let dhBounds = { minX, maxX, minY, maxY, minZ, maxZ };
 
-      // Fusionar con los bounds de las otras capas ya cargadas (Bloques, Muestras)
+      // Fusionar con los bounds de las otras capas ya cargadas (Bloques, Muestras, DXF)
       if (this.blockData && this.blockData.bounds) {
         dhBounds = this._extendBounds(dhBounds, this.blockData.bounds);
       }
       if (this.samplesData) {
         dhBounds = this._extendBounds(dhBounds, this.samplesData.bounds);
       }
+      dhBounds = this._extendBounds(dhBounds, this.scene.getDxfBounds());
 
       this.scene.setDataBounds(dhBounds);
       if (!this.blockData && !this.samplesData) {
@@ -1339,6 +1341,7 @@ class GeometApp {
       if (this.drillholeData && this.drillholeData.intervals && this.drillholeData.intervals.length > 0) {
         b = this._extendBounds(b, this._boundsFromIntervals(this.drillholeData.intervals));
       }
+      b = this._extendBounds(b, this.scene.getDxfBounds());
       this.scene.setDataBounds(b);
       // Solo enfocar la cámara si las Muestras son la primera capa cargada
       if (!this.blockData && !this.drillholeData) {
@@ -1370,6 +1373,29 @@ class GeometApp {
       this.logConsole('success', `DXF importado. Capas: ${data.layerCount}, Caras: ${data.triCount.toLocaleString()}, Polilíneas: ${data.lineCount.toLocaleString()}`);
     } else {
       this.logConsole('warn', 'DXF leído pero no se importó ninguna capa (ver advertencia anterior con el detalle).');
+    }
+
+    // Fusionar los bounds de las superficies DXF recién agregadas con los de
+    // las otras capas ya cargadas (Bloques, Sondajes, Muestras) — corrige un
+    // bug real: antes, _dataBounds nunca incluía DXF, así que una superficie
+    // que se extendiera más allá del modelo de bloques quedaba recortada por
+    // completo (invisible, no solo "fuera de foco") al usar Modo Vista,
+    // Vista Superior/Frontal/Lateral o el botón Home, porque esos usan un
+    // frustum ortográfico calculado directamente de _dataBounds. Ver
+    // getDxfBounds() en scene.js.
+    const dxfBounds = this.scene.getDxfBounds();
+    if (dxfBounds) {
+      let b = { ...dxfBounds };
+      if (this.blockData && this.blockData.bounds) {
+        b = this._extendBounds(b, this.blockData.bounds);
+      }
+      if (this.drillholeData && this.drillholeData.intervals && this.drillholeData.intervals.length > 0) {
+        b = this._extendBounds(b, this._boundsFromIntervals(this.drillholeData.intervals));
+      }
+      if (this.samplesData) {
+        b = this._extendBounds(b, this.samplesData.bounds);
+      }
+      this.scene.setDataBounds(b);
     }
 
     this.updateLayersTree();
