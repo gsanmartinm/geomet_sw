@@ -1101,20 +1101,29 @@ class GeometScene {
     let isCategorical = false;
     let minVal = 0, maxVal = 1;
     let lookupTable = [];
-    
+    let visibleCategoryIds = null;
+
     if (attrMeta) {
       isCategorical = attrMeta.type === 'category';
+      const buf = blockData.attributes[activeAttribute];
       if (isCategorical) {
         lookupTable = blockData.categoryLookups[activeAttribute] || [];
+        // Solo las categorías realmente presentes entre los bloques que pasan
+        // los filtros y el corte de sección activos (indicesToRender, el
+        // mismo subconjunto que efectivamente se está dibujando) — así la
+        // leyenda no sigue listando categorías que quedaron fuera del filtro.
+        visibleCategoryIds = new Set();
+        for (let i = 0; i < indicesToRender.length; i++) {
+          visibleCategoryIds.add(buf[indicesToRender[i]]);
+        }
       } else {
         // Mínimo
         if (customMin !== null && !isNaN(customMin)) {
           minVal = customMin;
         } else {
-          const buf = blockData.attributes[activeAttribute];
           let min = Infinity;
-          for (let i = 0; i < buf.length; i++) {
-            const val = buf[i];
+          for (let i = 0; i < indicesToRender.length; i++) {
+            const val = buf[indicesToRender[i]];
             if (val !== -999.0 && val < min) min = val;
           }
           minVal = min === Infinity ? 0 : min;
@@ -1123,19 +1132,18 @@ class GeometScene {
         if (customMax !== null && !isNaN(customMax)) {
           maxVal = customMax;
         } else {
-          const buf = blockData.attributes[activeAttribute];
           let max = -Infinity;
-          for (let i = 0; i < buf.length; i++) {
-            const val = buf[i];
+          for (let i = 0; i < indicesToRender.length; i++) {
+            const val = buf[indicesToRender[i]];
             if (val !== -999.0 && val > max) max = val;
           }
           maxVal = max === -Infinity ? 1 : max;
         }
       }
     }
-    
+
     // Actualizar leyenda
-    this.updateLegend('blocks', attrMeta, minVal, maxVal, lookupTable, paletteName);
+    this.updateLegend('blocks', attrMeta, minVal, maxVal, lookupTable, paletteName, visibleCategoryIds);
 
     const positions = blockData.positions;
     const sizes = blockData.sizes;
@@ -1423,7 +1431,8 @@ class GeometScene {
     let minVal = 0, maxVal = 1;
     let isCategorical = false;
     let lookupTable = [];
-    
+    let visibleCategoryIds = null;
+
     // Determinar tipo del atributo usando la metadata del worker
     let hasAttribute = false;
     
@@ -1453,6 +1462,17 @@ class GeometScene {
           // Usar lookup del worker si existe, o construir uno local
           if (drillholeData.assayCategoryLookups && drillholeData.assayCategoryLookups[activeAttribute]) {
             lookupTable = drillholeData.assayCategoryLookups[activeAttribute];
+            // El lookup del worker es GLOBAL (todas las categorías alguna vez
+            // importadas), así que hay que reducirlo a las que realmente
+            // aparecen entre los intervalos filtrados (intervalsToRender) —
+            // mismo criterio ya usado más abajo para colorear cada intervalo.
+            visibleCategoryIds = new Set();
+            for (const interval of intervalsToRender) {
+              const val = interval.values ? interval.values[activeAttribute] : undefined;
+              if (val === undefined || val === '') continue;
+              const catId = lookupTable.indexOf(val);
+              if (catId !== -1) visibleCategoryIds.add(catId);
+            }
           } else {
             const categories = new Set();
             for (const interval of intervalsToRender) {
@@ -1460,6 +1480,8 @@ class GeometScene {
               if (val !== undefined && val !== '') categories.add(val);
             }
             lookupTable = Array.from(categories);
+            // lookupTable ya se construyó solo con lo presente en
+            // intervalsToRender, así que no hace falta reducir nada más.
           }
         } else {
           // Mínimo
@@ -1563,7 +1585,7 @@ class GeometScene {
     // Actualizar leyenda
     if (hasAttribute) {
       const attrMeta = { name: activeAttribute, type: isCategorical ? 'category' : 'number' };
-      this.updateLegend('drillholes', attrMeta, minVal, maxVal, lookupTable, paletteName);
+      this.updateLegend('drillholes', attrMeta, minVal, maxVal, lookupTable, paletteName, visibleCategoryIds);
     } else {
       this.updateLegend('drillholes', null);
     }
@@ -1725,19 +1747,27 @@ class GeometScene {
     let isCategorical = false;
     let minVal = 0, maxVal = 1;
     let lookupTable = [];
+    let visibleCategoryIds = null;
 
     if (attrMeta) {
       isCategorical = attrMeta.type === 'category';
+      const buf = samplesData.attributes[activeAttribute];
       if (isCategorical) {
         lookupTable = samplesData.categoryLookups[activeAttribute] || [];
+        // Solo las categorías presentes entre las muestras que pasan los
+        // filtros/corte de sección activos (indicesToRender) — mismo
+        // criterio que en Bloques, ver comentario en updateBlockRender().
+        visibleCategoryIds = new Set();
+        for (let i = 0; i < indicesToRender.length; i++) {
+          visibleCategoryIds.add(buf[indicesToRender[i]]);
+        }
       } else {
-        const buf = samplesData.attributes[activeAttribute];
         if (customMin !== null && !isNaN(customMin)) {
           minVal = customMin;
         } else {
           let min = Infinity;
-          for (let i = 0; i < buf.length; i++) {
-            const val = buf[i];
+          for (let i = 0; i < indicesToRender.length; i++) {
+            const val = buf[indicesToRender[i]];
             if (val !== -999.0 && val < min) min = val;
           }
           minVal = min === Infinity ? 0 : min;
@@ -1746,8 +1776,8 @@ class GeometScene {
           maxVal = customMax;
         } else {
           let max = -Infinity;
-          for (let i = 0; i < buf.length; i++) {
-            const val = buf[i];
+          for (let i = 0; i < indicesToRender.length; i++) {
+            const val = buf[indicesToRender[i]];
             if (val !== -999.0 && val > max) max = val;
           }
           maxVal = max === -Infinity ? 1 : max;
@@ -1756,7 +1786,7 @@ class GeometScene {
     }
 
     // Actualizar leyenda
-    this.updateLegend('samples', attrMeta, minVal, maxVal, lookupTable, paletteName);
+    this.updateLegend('samples', attrMeta, minVal, maxVal, lookupTable, paletteName, visibleCategoryIds);
 
     const positions = samplesData.positions;
     const attrBuffer = activeAttribute ? samplesData.attributes[activeAttribute] : null;
@@ -2173,7 +2203,7 @@ class GeometScene {
    * @param {Array} lookupTable Lista de nombres de categoría (solo categórico)
    * @param {string} paletteName Nombre de la paleta activa para esta capa
    */
-  updateLegend(target, attrMeta, minVal, maxVal, lookupTable, paletteName) {
+  updateLegend(target, attrMeta, minVal, maxVal, lookupTable, paletteName, visibleCategoryIds) {
     // Los tres targets ('blocks', 'drillholes', 'samples') coinciden
     // exactamente con el sufijo de los IDs del DOM (legend-blocks,
     // legend-drillholes, legend-samples), así que no hace falta remapear.
@@ -2185,7 +2215,7 @@ class GeometScene {
     // poder re-renderizarla al reactivar el switch "Leyenda" del panel
     // Visualización sin depender de un nuevo render de datos (ver
     // setLegendVisible()).
-    this._lastLegendParams[target] = { attrMeta, minVal, maxVal, lookupTable, paletteName };
+    this._lastLegendParams[target] = { attrMeta, minVal, maxVal, lookupTable, paletteName, visibleCategoryIds };
 
     // Si no hay atributo activo, o el usuario apagó la leyenda de esta capa
     // desde el switch "Leyenda" (this.legendVisible[target]), se mantiene
@@ -2205,8 +2235,17 @@ class GeometScene {
     container.innerHTML = "";
 
     if (attrMeta.type === 'category') {
-      // Leyenda discreta
+      // Leyenda discreta. Si se pasó visibleCategoryIds (categorías
+      // realmente presentes entre los bloques/intervalos/muestras que pasan
+      // los filtros y el corte de sección activos — ver getFilteredBlockIndices()
+      // y equivalentes), se omiten las categorías del lookup global que no
+      // aparecen en ese subconjunto, para que la leyenda coincida con lo que
+      // se ve en el visor. Los IDs y sus colores NO se renumeran: solo se
+      // decide qué filas mostrar, así los overrides de color por categoría
+      // (this.categoryColorOverrides) siguen funcionando igual.
       lookupTable.forEach((catName, id) => {
+        if (visibleCategoryIds && !visibleCategoryIds.has(id)) return;
+
         const col = this.getDiscreteColor(id, target, attrMeta.name, lookupTable);
         const hex = `#${col.getHexString()}`;
 
@@ -2291,7 +2330,7 @@ class GeometScene {
 
     const params = this._lastLegendParams[target];
     if (params) {
-      this.updateLegend(target, params.attrMeta, params.minVal, params.maxVal, params.lookupTable, params.paletteName);
+      this.updateLegend(target, params.attrMeta, params.minVal, params.maxVal, params.lookupTable, params.paletteName, params.visibleCategoryIds);
     } else {
       const legendEl = document.getElementById(`legend-${target}`);
       if (legendEl) legendEl.classList.toggle('hidden', !visible);
