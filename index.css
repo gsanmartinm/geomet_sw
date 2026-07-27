@@ -252,6 +252,64 @@ body {
   border-left: 1px solid var(--border-color);
 }
 
+/* Panel colapsado (ver toggleSidebar() en app.js): se lleva el ancho a 0 en
+   vez de usar display:none, para que la transición de --transition-smooth
+   anime el colapso/expansión. overflow:hidden es lo que permite que el
+   ítem flex realmente encoja a 0 (si no, el contenido interno —textos de
+   pestañas, etc.— impondría un ancho mínimo mayor); min-width:0 refuerza lo
+   mismo por si el navegador no aplica esa regla por defecto. */
+.sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: none;
+}
+
+/* Botones de mostrar/ocultar panel: viven pegados a la costura entre el
+   sidebar y el visor 3D, como pestañas angostas — siempre visibles y
+   clickeables sin importar si el panel está expandido o colapsado (por eso
+   son hijos de #main-layout, no del <aside>: si estuvieran dentro del
+   sidebar quedarían recortados junto con el resto al colapsar a width:0). */
+.sidebar-toggle-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 46px;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  transition: var(--transition-smooth);
+}
+.sidebar-toggle-btn:hover {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+.sidebar-toggle-left {
+  left: 300px;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+}
+.sidebar-toggle-left.sidebar-hidden {
+  left: 0;
+}
+.sidebar-toggle-right {
+  right: 320px;
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+}
+.sidebar-toggle-right.sidebar-hidden {
+  right: 0;
+}
+
 /* Tabs */
 .sidebar-tabs {
   display: flex;

@@ -914,6 +914,48 @@ class GeometApp {
     });
   }
 
+  /**
+   * Colapsa/expande el panel izquierdo ('left') o derecho ('right') — botones
+   * #btn-toggle-left-sidebar / #btn-toggle-right-sidebar, ver comentario en
+   * index.html sobre por qué viven fuera del <aside>. El ancho se anima vía
+   * CSS (.sidebar.collapsed, transition ya definida en .sidebar), pero el
+   * canvas 3D no se entera solo: Three.js necesita que alguien le avise el
+   * nuevo tamaño (ver onWindowResize() en scene.js, atado normalmente al
+   * evento 'resize' de la VENTANA, que acá no se dispara porque la ventana
+   * en sí no cambia de tamaño). Por eso se llama onWindowResize() en un loop
+   * de rAF durante toda la transición (no solo al final): así el visor se ve
+   * ensanchándose junto con el panel en vez de "saltar" de tamaño de golpe
+   * cuando termina la animación.
+   */
+  toggleSidebar(side) {
+    const isLeft = side === 'left';
+    const sidebar = document.getElementById(isLeft ? 'left-sidebar' : 'right-sidebar');
+    const btn = document.getElementById(isLeft ? 'btn-toggle-left-sidebar' : 'btn-toggle-right-sidebar');
+    if (!sidebar || !btn) return;
+
+    const collapsed = sidebar.classList.toggle('collapsed');
+    btn.classList.toggle('sidebar-hidden', collapsed);
+
+    if (isLeft) {
+      btn.innerText = collapsed ? '›' : '‹';
+    } else {
+      btn.innerText = collapsed ? '‹' : '›';
+    }
+    btn.title = collapsed
+      ? `Mostrar panel ${isLeft ? 'izquierdo' : 'derecho'}`
+      : `Ocultar panel ${isLeft ? 'izquierdo' : 'derecho'}`;
+
+    const start = performance.now();
+    const duration = 300; // margen sobre los 250ms de --transition-smooth
+    const step = () => {
+      this.scene.onWindowResize();
+      if (performance.now() - start < duration) {
+        requestAnimationFrame(step);
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
   logConsole(type, message, file = 'Sistema', line = '') {
     const consoleBody = document.getElementById('console-messages');
     const warnBadge = document.getElementById('console-warn-count');
