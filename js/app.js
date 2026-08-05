@@ -881,10 +881,12 @@ class GeometApp {
   }
 
   /**
-   * Tema claro/oscuro del chrome de la app (sidebars, consola, modal — el
-   * visor 3D se mantiene oscuro en los dos temas, ver comentario en
-   * index.css). Preferencia persistida en localStorage para no tener que
-   * re-elegirla cada vez que se abre la app.
+   * Tema claro/oscuro del chrome de la app (sidebars, consola, modal) y del
+   * fondo del visor 3D (blanco en claro, negro en oscuro — ver
+   * setViewportTheme() en scene.js). Los widgets que flotan SOBRE el visor
+   * (leyendas, brújula, etc.) se mantienen oscuros en los dos temas, ver
+   * comentario en index.css. Preferencia persistida en localStorage para no
+   * tener que re-elegirla cada vez que se abre la app.
    */
   initThemeToggle() {
     const btn = document.getElementById('btn-toggle-theme');
@@ -894,6 +896,11 @@ class GeometApp {
       document.body.classList.toggle('light-mode', light);
       document.body.classList.toggle('dark-mode', !light);
       btn.innerText = light ? '🌙 Tema Oscuro' : '☀ Tema Claro';
+      // Fondo del visor 3D (antes se mantenía siempre oscuro a propósito,
+      // ver comentario en index.css — ahora sigue el tema por pedido del
+      // usuario). this.scene ya existe siempre que se llama applyTheme()
+      // porque init() lo crea antes de initThemeToggle().
+      if (this.scene) this.scene.setViewportTheme(light);
     };
 
     let savedPreference = null;
@@ -912,69 +919,6 @@ class GeometApp {
         localStorage.setItem('geomet-theme', nowLight ? 'light' : 'dark');
       } catch (e) { /* ver comentario arriba */ }
     });
-  }
-
-  /**
-   * Colapsa/expande el panel izquierdo ('left') o derecho ('right') — botones
-   * #btn-toggle-left-sidebar / #btn-toggle-right-sidebar, ver comentario en
-   * index.html sobre por qué viven fuera del <aside>. El ancho se anima vía
-   * CSS (.sidebar.collapsed, transition ya definida en .sidebar), pero el
-   * canvas 3D no se entera solo: Three.js necesita que alguien le avise el
-   * nuevo tamaño (ver onWindowResize() en scene.js, atado normalmente al
-   * evento 'resize' de la VENTANA, que acá no se dispara porque la ventana
-   * en sí no cambia de tamaño). Por eso se llama onWindowResize() en un loop
-   * durante toda la transición (no solo al final): así el visor se ve
-   * ensanchándose junto con el panel en vez de "saltar" de tamaño de golpe
-   * cuando termina la animación.
-   *
-   * El loop está THROTTLEADO (máx. ~10 llamadas en 300ms, no una por frame)
-   * y usa un token de cancelación (_sidebarResizeToken): si el usuario hace
-   * clic en un botón mientras el loop de un clic anterior todavía está
-   * corriendo (ej. clic izquierdo y derecho seguidos), el loop viejo se
-   * autocancela en vez de seguir corriendo en paralelo. Sin esto, cada clic
-   * rápido sumaba otro loop de ~18 llamadas a renderer.setSize() (costoso,
-   * recrea framebuffers de WebGL) corriendo al mismo tiempo, lo que podía
-   * saturar el hilo principal justo mientras la transición CSS de ancho
-   * seguía en curso y dejar el layout con un aspecto deformado por unos
-   * instantes.
-   */
-  toggleSidebar(side) {
-    const isLeft = side === 'left';
-    const sidebar = document.getElementById(isLeft ? 'left-sidebar' : 'right-sidebar');
-    const btn = document.getElementById(isLeft ? 'btn-toggle-left-sidebar' : 'btn-toggle-right-sidebar');
-    if (!sidebar || !btn) return;
-
-    const collapsed = sidebar.classList.toggle('collapsed');
-    btn.classList.toggle('sidebar-hidden', collapsed);
-
-    if (isLeft) {
-      btn.innerText = collapsed ? '›' : '‹';
-    } else {
-      btn.innerText = collapsed ? '‹' : '›';
-    }
-    btn.title = collapsed
-      ? `Mostrar panel ${isLeft ? 'izquierdo' : 'derecho'}`
-      : `Ocultar panel ${isLeft ? 'izquierdo' : 'derecho'}`;
-
-    this._sidebarResizeToken = (this._sidebarResizeToken || 0) + 1;
-    const myToken = this._sidebarResizeToken;
-
-    const start = performance.now();
-    const duration = 300; // margen sobre los 250ms de --transition-smooth
-    let lastCall = 0;
-    const step = (now) => {
-      if (myToken !== this._sidebarResizeToken) return; // cancelado por un clic más nuevo
-      if (now - lastCall > 30) {
-        this.scene.onWindowResize();
-        lastCall = now;
-      }
-      if (now - start < duration) {
-        requestAnimationFrame(step);
-      } else {
-        this.scene.onWindowResize(); // llamada final: asegura el tamaño exacto ya asentado
-      }
-    };
-    requestAnimationFrame(step);
   }
 
   logConsole(type, message, file = 'Sistema', line = '') {
@@ -1070,7 +1014,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=7');
+    this.worker = new Worker('js/worker-parser.js?v=8');
     
     const t0 = performance.now();
     

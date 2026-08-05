@@ -35,8 +35,10 @@
 }
 
 /* Tema claro (toggle en el header — ver initThemeToggle() en app.js,
-   persiste en localStorage). Decisión de alcance: el VISOR 3D y todo lo que
-   flota directamente sobre él (leyendas, brújula, tooltip, badge del
+   persiste en localStorage). Decisión de alcance: el fondo del VISOR 3D
+   en sí (scene.background en scene.js + #viewport-container más abajo) SÍ
+   sigue el tema (blanco en claro, negro en oscuro), pero los widgets que
+   flotan directamente sobre él (leyendas, brújula, tooltip, badge del
    Planificador, toasts, FPS/navegación) se mantienen con su estilo oscuro
    en los dos temas — es una convención común en software CAD/GIS
    profesional (mejor contraste para datos coloreados sobre fondo oscuro,
@@ -47,10 +49,9 @@
 body.light-mode {
   --bg-primary: hsl(220, 25%, 97%);
   --bg-secondary: hsl(220, 20%, 92%);
-  /* Más opaco que en tema oscuro (0.75 → 0.94): el visor 3D sigue siendo
-     oscuro a propósito (ver comentario más abajo), así que un panel muy
-     transparente encima dejaba pasar ese fondo oscuro y el sidebar se veía
-     grisáceo en vez de claramente claro. */
+  /* Más opaco que en tema oscuro (0.75 → 0.94): un panel muy transparente
+     dejaba pasar demasiado el fondo detrás y el sidebar se veía grisáceo
+     en vez de claramente claro. */
   --bg-panel: hsla(220, 30%, 100%, 0.94);
   --bg-card: hsla(220, 20%, 100%, 0.96);
   --bg-active: hsl(220, 20%, 84%);
@@ -252,81 +253,6 @@ body {
   border-left: 1px solid var(--border-color);
 }
 
-/* Panel colapsado (ver toggleSidebar() en app.js): se lleva el ancho a 0 en
-   vez de usar display:none, para que la transición de --transition-smooth
-   anime el colapso/expansión. overflow:hidden es lo que permite que el
-   ítem flex realmente encoja a 0 (si no, el contenido interno —textos de
-   pestañas, etc.— impondría un ancho mínimo mayor); min-width:0 refuerza lo
-   mismo por si el navegador no aplica esa regla por defecto. */
-.sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  border: none;
-}
-/* #right-sidebar declara su propio "width: 320px" con selector de ID
-   (especificidad 1-0-0), que le GANA a ".sidebar.collapsed" (dos clases,
-   especificidad 0-2-0) sin importar el orden en el archivo — por eso el
-   panel derecho nunca se colapsaba en la práctica: el botón se movía pero
-   el <aside> se quedaba fijo en 320px. Se agrega esta regla combinada
-   (ID + clase, especificidad 1-1-0) para volver a ganarle a la regla de
-   solo-ID y que el ancho sí baje a 0. #left-sidebar no tiene un "width"
-   propio con ID (solo hereda el de .sidebar), así que nunca tuvo este
-   problema, pero se agrega su versión igual por si en el futuro se le
-   agrega un override por ID como al derecho. */
-#left-sidebar.collapsed,
-#right-sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  border: none;
-}
-
-/* Botones de mostrar/ocultar panel: viven pegados a la costura entre el
-   sidebar y el visor 3D, como pestañas angostas — siempre visibles y
-   clickeables sin importar si el panel está expandido o colapsado (por eso
-   son hijos de #main-layout, no del <aside>: si estuvieran dentro del
-   sidebar quedarían recortados junto con el resto al colapsar a width:0). */
-.sidebar-toggle-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 18px;
-  height: 46px;
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  color: var(--text-muted);
-  cursor: pointer;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  line-height: 1;
-  padding: 0;
-  transition: var(--transition-smooth);
-}
-.sidebar-toggle-btn:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-}
-.sidebar-toggle-left {
-  left: 300px;
-  border-left: none;
-  border-radius: 0 6px 6px 0;
-}
-.sidebar-toggle-left.sidebar-hidden {
-  left: 0;
-}
-.sidebar-toggle-right {
-  right: 320px;
-  border-right: none;
-  border-radius: 6px 0 0 6px;
-}
-.sidebar-toggle-right.sidebar-hidden {
-  right: 0;
-}
-
 /* Tabs */
 .sidebar-tabs {
   display: flex;
@@ -509,11 +435,18 @@ body {
   color: var(--text-muted);
 }
 
-/* Viewport 3D */
+/* Viewport 3D. El color real que se ve es scene.background (WebGL, ver
+   setViewportTheme() en scene.js) — este background-color es solo el
+   "detrás del canvas" mientras carga o si el canvas no llega a cubrir
+   el 100% del contenedor, pero se mantiene sincronizado con el mismo
+   color para no dejar un flash del color equivocado. */
 #viewport-container {
   flex: 1;
   position: relative;
   background-color: #000;
+}
+body.light-mode #viewport-container {
+  background-color: #fff;
 }
 #three-canvas {
   width: 100%;

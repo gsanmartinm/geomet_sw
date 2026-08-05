@@ -233,6 +233,20 @@ class GeometScene {
     this.renderer.setSize(this.width, this.height);
   }
 
+  /**
+   * Cambia el color de fondo del visor 3D según el tema claro/oscuro del
+   * chrome de la app — ver initThemeToggle() en app.js. Actualiza tanto el
+   * fondo de la escena principal (scene.background, lo que realmente pinta
+   * el WebGLRenderer) como el del gizmo de ejes en miniatura (misma lógica
+   * que se usó al crearlo: fondo propio para que su recorte no quede
+   * "manchado" con lo que haya detrás).
+   */
+  setViewportTheme(light) {
+    const color = light ? 0xffffff : 0x0a0f18;
+    this.scene.background = new THREE.Color(color);
+    this.axisGizmoScene.background = new THREE.Color(color);
+  }
+
   // Actualiza el widget de brújula HTML en tiempo real
   _updateCompass() {
     const needle = document.getElementById('compass-needle');
