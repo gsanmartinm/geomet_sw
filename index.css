@@ -264,6 +264,23 @@ body {
   overflow: hidden;
   border: none;
 }
+/* #right-sidebar declara su propio "width: 320px" con selector de ID
+   (especificidad 1-0-0), que le GANA a ".sidebar.collapsed" (dos clases,
+   especificidad 0-2-0) sin importar el orden en el archivo — por eso el
+   panel derecho nunca se colapsaba en la práctica: el botón se movía pero
+   el <aside> se quedaba fijo en 320px. Se agrega esta regla combinada
+   (ID + clase, especificidad 1-1-0) para volver a ganarle a la regla de
+   solo-ID y que el ancho sí baje a 0. #left-sidebar no tiene un "width"
+   propio con ID (solo hereda el de .sidebar), así que nunca tuvo este
+   problema, pero se agrega su versión igual por si en el futuro se le
+   agrega un override por ID como al derecho. */
+#left-sidebar.collapsed,
+#right-sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: none;
+}
 
 /* Botones de mostrar/ocultar panel: viven pegados a la costura entre el
    sidebar y el visor 3D, como pestañas angostas — siempre visibles y

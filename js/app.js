@@ -923,9 +923,20 @@ class GeometApp {
    * nuevo tamaño (ver onWindowResize() en scene.js, atado normalmente al
    * evento 'resize' de la VENTANA, que acá no se dispara porque la ventana
    * en sí no cambia de tamaño). Por eso se llama onWindowResize() en un loop
-   * de rAF durante toda la transición (no solo al final): así el visor se ve
+   * durante toda la transición (no solo al final): así el visor se ve
    * ensanchándose junto con el panel en vez de "saltar" de tamaño de golpe
    * cuando termina la animación.
+   *
+   * El loop está THROTTLEADO (máx. ~10 llamadas en 300ms, no una por frame)
+   * y usa un token de cancelación (_sidebarResizeToken): si el usuario hace
+   * clic en un botón mientras el loop de un clic anterior todavía está
+   * corriendo (ej. clic izquierdo y derecho seguidos), el loop viejo se
+   * autocancela en vez de seguir corriendo en paralelo. Sin esto, cada clic
+   * rápido sumaba otro loop de ~18 llamadas a renderer.setSize() (costoso,
+   * recrea framebuffers de WebGL) corriendo al mismo tiempo, lo que podía
+   * saturar el hilo principal justo mientras la transición CSS de ancho
+   * seguía en curso y dejar el layout con un aspecto deformado por unos
+   * instantes.
    */
   toggleSidebar(side) {
     const isLeft = side === 'left';
@@ -945,12 +956,22 @@ class GeometApp {
       ? `Mostrar panel ${isLeft ? 'izquierdo' : 'derecho'}`
       : `Ocultar panel ${isLeft ? 'izquierdo' : 'derecho'}`;
 
+    this._sidebarResizeToken = (this._sidebarResizeToken || 0) + 1;
+    const myToken = this._sidebarResizeToken;
+
     const start = performance.now();
     const duration = 300; // margen sobre los 250ms de --transition-smooth
-    const step = () => {
-      this.scene.onWindowResize();
-      if (performance.now() - start < duration) {
+    let lastCall = 0;
+    const step = (now) => {
+      if (myToken !== this._sidebarResizeToken) return; // cancelado por un clic más nuevo
+      if (now - lastCall > 30) {
+        this.scene.onWindowResize();
+        lastCall = now;
+      }
+      if (now - start < duration) {
         requestAnimationFrame(step);
+      } else {
+        this.scene.onWindowResize(); // llamada final: asegura el tamaño exacto ya asentado
       }
     };
     requestAnimationFrame(step);
@@ -1049,7 +1070,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=3');
+    this.worker = new Worker('js/worker-parser.js?v=7');
     
     const t0 = performance.now();
     
