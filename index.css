@@ -485,7 +485,6 @@ body.light-mode #viewport-container {
   font-size: var(--axis-ruler-font-size, 0.68rem);
   font-weight: 500;
   color: var(--grid-green);
-  text-shadow: 0 0 4px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.85);
   white-space: nowrap;
   pointer-events: none;
   letter-spacing: 0.2px;
