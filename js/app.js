@@ -1014,7 +1014,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=12');
+    this.worker = new Worker('js/worker-parser.js?v=13');
     
     const t0 = performance.now();
     
@@ -1373,7 +1373,26 @@ class GeometApp {
     }
 
     for (const name in data.layers) {
-      this.scene.addDxfLayer(name, data.layers[name]);
+      const layerData = data.layers[name];
+      let targetName = name;
+
+      // Si ya existe una capa con este MISMO nombre (código de grupo 8 del
+      // DXF) pero proveniente de un archivo de origen DISTINTO, se trata
+      // como una capa nueva en vez de reemplazar la existente — típico al
+      // importar varios recortes de "Recortar al Área de Interés" hechos a
+      // partir de un mismo DXF pesado: todos heredan el mismo nombre de capa
+      // interno, y sin este chequeo cada import pisaba al anterior (addDxfLayer()
+      // usa el nombre de capa como clave única en scene.dxfMeshes). Si el
+      // archivo de origen SÍ coincide, se asume que es una recarga intencional
+      // de la misma capa (ej. se corrigió el DXF y se reimportó) y se
+      // mantiene el comportamiento de reemplazo de siempre.
+      const existingStyle = this.scene.dxfLayerStyles[name];
+      if (this.scene.dxfMeshes[name] && existingStyle && existingStyle.sourceFileName !== layerData.sourceFileName) {
+        targetName = this._uniqueDxfLayerName(name);
+        this.logConsole('info', `Ya había una capa DXF llamada "${name}" de otro archivo — esta se importó como "${targetName}" para no reemplazarla.`);
+      }
+
+      this.scene.addDxfLayer(targetName, layerData);
     }
 
     if (data.layerCount > 0) {
@@ -1414,6 +1433,21 @@ class GeometApp {
     }
 
     this.updateLayersTree();
+  }
+
+  /**
+   * Genera un nombre de capa DXF único agregando " (2)", " (3)", etc. al
+   * nombre base, probando hasta encontrar uno que no exista todavía en
+   * scene.dxfMeshes — ver loadDxfData().
+   */
+  _uniqueDxfLayerName(baseName) {
+    let n = 2;
+    let candidate = `${baseName} (${n})`;
+    while (this.scene.dxfMeshes[candidate]) {
+      n++;
+      candidate = `${baseName} (${n})`;
+    }
+    return candidate;
   }
 
   generateSyntheticBlocks(blockCount) {
