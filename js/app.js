@@ -1014,7 +1014,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=9');
+    this.worker = new Worker('js/worker-parser.js?v=10');
     
     const t0 = performance.now();
     

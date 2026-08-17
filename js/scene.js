@@ -100,6 +100,40 @@ class GeometScene {
     // Indicadores de dirección (N, E, Z)
     this._dataBounds = null; // Guarda los últimos bounds para reset
 
+    // ORIGEN LOCAL DE COORDENADAS — fix de precisión float32 en datasets con
+    // coordenadas UTM reales (millones de metros, ej. Northing 7.142.500).
+    //
+    // Por qué existe: los buffers de vértices que WebGL manda a la GPU son
+    // siempre Float32Array (32 bits), sin importar que JS use doubles de 64
+    // bits internamente. A magnitud ~7.100.000, un float32 solo puede
+    // representar pasos de ~0,5 m — cualquier par de puntos más cercanos que
+    // eso se redondean al MISMO valor en la GPU. Esto no es solo la posición
+    // de los vértices: la propia matriz vista/proyección de la cámara
+    // (camera.matrixWorldInverse.elements) también es un Float32Array, así
+    // que si la cámara sigue posicionada en coordenadas UTM reales, el
+    // problema persiste aunque los vértices se hayan movido. Por eso NO
+    // alcanza con achicar solo los buffers de geometría: cámara Y geometría
+    // tienen que operar en el mismo espacio "local" (chico) para que la
+    // multiplicación de matrices en el shader nunca tenga que representar
+    // "millones ± sub-metro" en un solo float32.
+    //
+    // Cómo funciona: worldOrigin se fija UNA SOLA VEZ por sesión (ver
+    // establishWorldOrigin()), la primera vez que llega algún dato real —
+    // bloques, sondajes, muestras o DXF, lo que cargue primero. A partir de
+    // ahí, TODO lo que construye geometría (updateBlockRender,
+    // updateDrillholeRender, updateSamplesRender, addDxfLayer,
+    // updateProposedHolesRender) y TODO lo que posiciona la cámara desde
+    // bounds (focusOnBounds, setView, enterViewMode) resta worldOrigin antes
+    // de mandar coordenadas a Three.js. Los resultados de raycasting que se
+    // devuelven como coordenadas "reales" al resto de la app (pickCollarAtNDC,
+    // pickOnHorizontalPlaneAtNDC, getDxfBounds) sí vuelven a sumar
+    // worldOrigin antes de retornar, para que app.js — filtros, variables
+    // calculadas, el planificador de sondajes, el panel de resumen, la
+    // exportación PNG — nunca tengan que saber que esto existe: siguen
+    // trabajando 100% en coordenadas reales, sin ningún cambio.
+    this.worldOrigin = new THREE.Vector3(0, 0, 0);
+    this._worldOriginSet = false;
+
     // Regla de ejes con valores de referencia: grilla verde sutil + etiquetas
     // numéricas, visible solo en vistas ortogonales exactas (Planta/Perfil N/
     // Perfil E), para poder leer cotas Z y coordenadas X/Y al revisar
@@ -460,10 +494,17 @@ class GeometScene {
     const horizTicks = this._computeTicks(horizMin, horizMax);
     const vertTicks = this._computeTicks(vertMin, vertMax);
 
+    // Resta worldOrigin acá, en el ÚNICO punto donde esta función construye
+    // puntos 3D — todo lo que sigue (project2D, líneas de grilla, anclas de
+    // etiqueta) los usa para "p.project(this.camera)", y la cámara ahora
+    // opera en espacio LOCAL (ver comentario extenso de worldOrigin en el
+    // constructor). El TEXTO de las etiquetas (_formatTickValue(v), más
+    // abajo) sigue usando el tick `v` real sin pasar por acá, así que sigue
+    // mostrando la coordenada real correctamente sin cambios.
     const toXYZ = (vals) => [
-      vals.x !== undefined ? vals.x : 0,
-      vals.y !== undefined ? vals.y : 0,
-      vals.z !== undefined ? vals.z : 0
+      (vals.x !== undefined ? vals.x : 0) - this.worldOrigin.x,
+      (vals.y !== undefined ? vals.y : 0) - this.worldOrigin.y,
+      (vals.z !== undefined ? vals.z : 0) - this.worldOrigin.z
     ];
 
     // Determinar, según la orientación real de la cámara en este momento,
@@ -685,6 +726,38 @@ class GeometScene {
   // + superficies DXF cargadas (ver getDxfBounds() para el aporte de DXF).
   setDataBounds(bounds) {
     this._dataBounds = bounds;
+    this.establishWorldOrigin(bounds);
+  }
+
+  /**
+   * Fija this.worldOrigin (ver comentario extenso en el constructor) UNA
+   * SOLA VEZ por sesión, al centro del primer `bounds` real que llegue —
+   * no importa si es de Bloques, Sondajes, Muestras o DXF, lo que se cargue
+   * primero. Llamadas posteriores son no-op (_worldOriginSet ya en true),
+   * así que todas las capas quedan consistentes entre sí en el mismo
+   * espacio local, sin importar el orden de carga. Se llama tanto desde
+   * setDataBounds() (bounds ya "unificado" de toda la escena) como, más
+   * temprano, desde cada updateXxxRender()/addDxfLayer() con lo que tengan
+   * a mano en ese momento — así el origen queda establecido ANTES de que
+   * esa misma función construya su propia geometría, evitando que la
+   * primera capa cargada quede "desalineada" del resto si establishWorldOrigin
+   * se disparara recién después (ver setDataBounds(), que en app.js siempre
+   * se llama DESPUÉS de scene.addDxfLayer()/updateBlockRender() etc.).
+   * `bounds` puede ser un bounding box real o, si solo se tiene un punto
+   * disponible, un bounds "degenerado" (min===max) — el centro da igual el
+   * punto exacto, que sirve perfectamente como origen local.
+   */
+  establishWorldOrigin(bounds) {
+    if (this._worldOriginSet || !bounds) return;
+    this.worldOrigin.set(
+      (bounds.minX + bounds.maxX) / 2,
+      (bounds.minY + bounds.maxY) / 2,
+      (bounds.minZ + bounds.maxZ) / 2
+    );
+    this._worldOriginSet = true;
+    if (typeof app !== 'undefined' && app.logConsole) {
+      app.logConsole('info', `Origen local de coordenadas fijado en (${this.worldOrigin.x.toFixed(1)}, ${this.worldOrigin.y.toFixed(1)}, ${this.worldOrigin.z.toFixed(1)}) para evitar pérdida de precisión en coordenadas UTM al hacer zoom.`);
+    }
   }
 
   getDataBounds() {
@@ -714,10 +787,16 @@ class GeometScene {
     if (Object.keys(this.dxfMeshes).length === 0) return null;
     const box = new THREE.Box3().setFromObject(this.dxfGroup);
     if (box.isEmpty()) return null;
+    // this.dxfGroup contiene geometría en espacio LOCAL (worldOrigin ya
+    // restado al construirla en addDxfLayer() — ver comentario extenso en el
+    // constructor), pero el contrato de este método hacia app.js es devolver
+    // coordenadas REALES (así lo esperan loadBlockData/loadDrillholeData/
+    // loadSamplesData/loadDxfData, que fusionan esto con el resto de bounds
+    // sin saber nada de worldOrigin) — hay que sumarlo de vuelta acá.
     return {
-      minX: box.min.x, maxX: box.max.x,
-      minY: box.min.y, maxY: box.max.y,
-      minZ: box.min.z, maxZ: box.max.z
+      minX: box.min.x + this.worldOrigin.x, maxX: box.max.x + this.worldOrigin.x,
+      minY: box.min.y + this.worldOrigin.y, maxY: box.max.y + this.worldOrigin.y,
+      minZ: box.min.z + this.worldOrigin.z, maxZ: box.max.z + this.worldOrigin.z
     };
   }
 
@@ -738,8 +817,11 @@ class GeometScene {
     let dist = 500;
 
     if (b) {
-      // Centro del bounding box de todos los datos
+      // Centro del bounding box de todos los datos, convertido a espacio
+      // LOCAL (ver comentario de worldOrigin en el constructor) restando el
+      // origen — dist es una diferencia, no necesita ajuste.
       target.set((b.minX + b.maxX)/2, (b.minY + b.maxY)/2, (b.minZ + b.maxZ)/2);
+      target.sub(this.worldOrigin);
       const dx = b.maxX - b.minX;
       const dy = b.maxY - b.minY;
       const dz = b.maxZ - b.minZ;
@@ -790,7 +872,10 @@ class GeometScene {
     let dx = 200, dy = 200, dz = 200;
 
     if (b) {
+      // Centro en espacio LOCAL (restando worldOrigin) — ver setView() y el
+      // comentario de worldOrigin en el constructor.
       target.set((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2);
+      target.sub(this.worldOrigin);
       dx = Math.max(b.maxX - b.minX, 10);
       dy = Math.max(b.maxY - b.minY, 10);
       dz = Math.max(b.maxZ - b.minZ, 10);
@@ -947,30 +1032,47 @@ class GeometScene {
   }
 
   focusOnBounds(bounds) {
+    // establishWorldOrigin() es no-op si ya se fijó antes (ver comentario en
+    // el constructor) — se llama acá también por si focusOnBounds() se
+    // invoca (ej. desde addDxfLayer() en la primera carga) antes que
+    // setDataBounds().
+    this.establishWorldOrigin(bounds);
+
+    // Centro REAL (UTM) del bounds, para los cálculos de tamaño (maxDim) que
+    // no dependen del origen — restar una constante no cambia una diferencia.
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cy = (bounds.minY + bounds.maxY) / 2;
     const cz = (bounds.minZ + bounds.maxZ) / 2;
-    
+
     const dx = bounds.maxX - bounds.minX;
     const dy = bounds.maxY - bounds.minY;
     const dz = bounds.maxZ - bounds.minZ;
     const maxDim = Math.max(dx, dy, dz, 100); // mínimo 100m de tamaño
-    
+
+    // Centro en espacio LOCAL (ver comentario de worldOrigin en el
+    // constructor): la cámara/target deben restar el mismo origen que se le
+    // resta a toda la geometría, para que ambos sigan alineados.
+    const lx = cx - this.worldOrigin.x;
+    const ly = cy - this.worldOrigin.y;
+    const lz = cz - this.worldOrigin.z;
+
     // Posicionar la cámara en perspectiva isométrica desde el noreste.
     // Z es la elevación real de los datos, así que el desplazamiento "hacia
     // arriba" de la vista isométrica debe aplicarse sobre Z, no sobre Y.
     this.camera.position.set(
-      cx + maxDim * 0.8,
-      cy + maxDim * 0.8,
-      cz + maxDim * 0.6
+      lx + maxDim * 0.8,
+      ly + maxDim * 0.8,
+      lz + maxDim * 0.6
     );
-    this.controls.target.set(cx, cy, cz);
+    this.controls.target.set(lx, ly, lz);
     this.camera.up.set(0, 0, 1);
-    this.camera.lookAt(cx, cy, cz);
+    this.camera.lookAt(lx, ly, lz);
     this.controls.update();
-    
-    // Ajustar near/far para coordenadas reales de proyectos mineros
-    // (ej. coordenadas UTM de 300000+)
+
+    // Ajustar near/far. Ya no hace falta "estirarlos" para tolerar
+    // coordenadas UTM reales (esa era una mitigación parcial del problema
+    // de precisión que worldOrigin ahora resuelve de raíz) — maxDim solo
+    // depende del tamaño real de los datos, no de su posición absoluta.
     this.camera.near = maxDim * 0.001;
     this.camera.far = maxDim * 50;
     this.camera.updateProjectionMatrix();
@@ -1104,6 +1206,10 @@ class GeometScene {
   // ==========================================
   updateBlockRender(blockData, activeAttribute, paletteName, renderMode, sizeFactor, customMin = null, customMax = null, opacity = 1.0) {
     this.blockData = blockData;
+    // Fija el origen local (no-op si ya estaba fijado, ver constructor) ANTES
+    // de construir geometría más abajo, por si Bloques es la primera capa
+    // que se carga en la sesión.
+    if (blockData && blockData.bounds) this.establishWorldOrigin(blockData.bounds);
     this.activeAttribute = activeAttribute;
     this.colorPaletteName = paletteName;
     this.renderMode = renderMode;
@@ -1206,10 +1312,13 @@ class GeometScene {
         const idx = indicesToRender[i];
         const idx3 = idx * 3;
         
-        pointPositions[i * 3] = positions[idx3];
-        pointPositions[i * 3 + 1] = positions[idx3 + 1];
-        pointPositions[i * 3 + 2] = positions[idx3 + 2];
-        
+        // Restar worldOrigin: ver comentario extenso en el constructor sobre
+        // por qué la geometría se construye en espacio LOCAL, no en las
+        // coordenadas UTM reales de blockData.positions.
+        pointPositions[i * 3] = positions[idx3] - this.worldOrigin.x;
+        pointPositions[i * 3 + 1] = positions[idx3 + 1] - this.worldOrigin.y;
+        pointPositions[i * 3 + 2] = positions[idx3 + 2] - this.worldOrigin.z;
+
         // Color
         let col = new THREE.Color(0x3b82f6); // color base azul
         if (attrBuffer) {
@@ -1263,7 +1372,15 @@ class GeometScene {
         const idx3 = idx * 3;
         
         // Configurar matriz de transformación
-        dummy.position.set(positions[idx3], positions[idx3 + 1], positions[idx3 + 2]);
+        // Restar worldOrigin (ver comentario en el constructor y en el
+        // branch de puntos más arriba) — el InstancedMesh guarda cada
+        // transformación como Matrix4 (también Float32Array internamente),
+        // así que sufre la misma pérdida de precisión si no se corrige acá.
+        dummy.position.set(
+          positions[idx3] - this.worldOrigin.x,
+          positions[idx3 + 1] - this.worldOrigin.y,
+          positions[idx3 + 2] - this.worldOrigin.z
+        );
         dummy.scale.set(
           sizes[idx3] * sizeFactor,
           sizes[idx3 + 1] * sizeFactor,
@@ -1449,7 +1566,19 @@ class GeometScene {
   updateDrillholeRender(drillholeData, activeAttribute, paletteName, thickness, customMin = null, customMax = null) {
     this.drillholeData = drillholeData;
     this.drillholeThickness = thickness;
-    
+
+    // Fija el origen local (no-op si ya estaba fijado) ANTES de construir
+    // geometría más abajo, por si Sondajes es la primera capa cargada en la
+    // sesión — ver comentario extenso en el constructor.
+    if (drillholeData && drillholeData.intervals && drillholeData.intervals.length > 0) {
+      const firstStart = drillholeData.intervals[0].startPos;
+      this.establishWorldOrigin({
+        minX: firstStart[0], maxX: firstStart[0],
+        minY: firstStart[1], maxY: firstStart[1],
+        minZ: firstStart[2], maxZ: firstStart[2]
+      });
+    }
+
     // Limpiar anterior
     while (this.drillholesGroup.children.length > 0) {
       const child = this.drillholesGroup.children[0];
@@ -1574,8 +1703,9 @@ class GeometScene {
     
     for (let i = 0; i < intervalsToRender.length; i++) {
       const interval = intervalsToRender[i];
-      const p1 = new THREE.Vector3(...interval.startPos);
-      const p2 = new THREE.Vector3(...interval.endPos);
+      // .sub(worldOrigin): ver comentario extenso en el constructor.
+      const p1 = new THREE.Vector3(...interval.startPos).sub(this.worldOrigin);
+      const p2 = new THREE.Vector3(...interval.endPos).sub(this.worldOrigin);
       
       // Vector dirección
       const dir = new THREE.Vector3().subVectors(p2, p1);
@@ -1675,8 +1805,11 @@ class GeometScene {
     let instanceCount = 0;
 
     visibleHoles.forEach((hole) => {
-      const p1 = new THREE.Vector3(hole.collar.x, hole.collar.y, hole.collar.z);
-      const p2 = new THREE.Vector3(hole.endPoint.x, hole.endPoint.y, hole.endPoint.z);
+      // .sub(worldOrigin): ver comentario extenso en el constructor. hole.collar/
+      // endPoint quedan sin tocar (siguen en coordenadas reales) — esto solo
+      // afecta la copia local usada para dibujar el cilindro.
+      const p1 = new THREE.Vector3(hole.collar.x, hole.collar.y, hole.collar.z).sub(this.worldOrigin);
+      const p2 = new THREE.Vector3(hole.endPoint.x, hole.endPoint.y, hole.endPoint.z).sub(this.worldOrigin);
       const dir = new THREE.Vector3().subVectors(p2, p1);
       const len = dir.length();
       if (len <= 0) return;
@@ -1730,8 +1863,12 @@ class GeometScene {
     const intersects = this.raycaster.intersectObjects(targets, false);
     if (intersects.length === 0) return null;
 
+    // intersects[0].point queda en espacio LOCAL (la cámara y las mallas DXF
+    // operan ahí — ver comentario extenso de worldOrigin en el constructor);
+    // se suma worldOrigin de vuelta porque el contrato de este método hacia
+    // app.js (Planificador de Sondajes) es devolver coordenadas REALES.
     const p = intersects[0].point;
-    return { x: p.x, y: p.y, z: p.z };
+    return { x: p.x + this.worldOrigin.x, y: p.y + this.worldOrigin.y, z: p.z + this.worldOrigin.z };
   }
 
   /**
@@ -1745,12 +1882,18 @@ class GeometScene {
     const mouse = new THREE.Vector2(ndcX, ndcY);
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -referenceZ);
+    // El rayo de la cámara opera en espacio LOCAL (ver comentario extenso de
+    // worldOrigin en el constructor), así que el plano hay que ubicarlo en
+    // la Z LOCAL equivalente a referenceZ (real). x/y del resultado se
+    // convierten de vuelta a reales antes de retornar; z ya es referenceZ
+    // (real, tal como se recibió).
+    const localZ = referenceZ - this.worldOrigin.z;
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -localZ);
     const target = new THREE.Vector3();
     const hit = this.raycaster.ray.intersectPlane(plane, target);
     if (!hit) return null;
 
-    return { x: target.x, y: target.y, z: referenceZ };
+    return { x: target.x + this.worldOrigin.x, y: target.y + this.worldOrigin.y, z: referenceZ };
   }
 
   // ==========================================
@@ -1765,6 +1908,9 @@ class GeometScene {
    */
   updateSamplesRender(samplesData, activeAttribute, paletteName, pointSizePx, customMin = null, customMax = null) {
     this.samplesData = samplesData;
+    // Fija el origen local (no-op si ya estaba fijado) por si Muestras es la
+    // primera capa cargada en la sesión — ver comentario en el constructor.
+    if (samplesData && samplesData.bounds) this.establishWorldOrigin(samplesData.bounds);
     if (pointSizePx) this.samplePointSize = pointSizePx;
 
     // Limpiar anterior
@@ -1845,9 +1991,10 @@ class GeometScene {
       const idx = indicesToRender[i];
       const idx3 = idx * 3;
 
-      pointPositions[i * 3] = positions[idx3];
-      pointPositions[i * 3 + 1] = positions[idx3 + 1];
-      pointPositions[i * 3 + 2] = positions[idx3 + 2];
+      // Restar worldOrigin: ver comentario extenso en el constructor.
+      pointPositions[i * 3] = positions[idx3] - this.worldOrigin.x;
+      pointPositions[i * 3 + 1] = positions[idx3 + 1] - this.worldOrigin.y;
+      pointPositions[i * 3 + 2] = positions[idx3 + 2] - this.worldOrigin.z;
 
       // Color base ámbar (distinto del azul de Bloques y de los colores por
       // ley de Sondajes) para que las muestras sean reconocibles a simple
@@ -1941,6 +2088,25 @@ class GeometScene {
     // Eliminar si ya existe
     this.removeDxfLayer(layerName);
 
+    // Fija el origen local (no-op si ya estaba fijado) ANTES de construir
+    // geometría más abajo, por si DXF es la primera capa cargada en la
+    // sesión — usa el primer vértice disponible como punto degenerado (ver
+    // comentario de establishWorldOrigin()). No hace falta ser exacto/
+    // centrado: cualquier punto cercano a los datos alcanza para el fix de
+    // precisión — ver comentario extenso de worldOrigin en el constructor.
+    if (!this._worldOriginSet) {
+      const firstPoint = (dxfData.triangles && dxfData.triangles.length >= 3) ? dxfData.triangles
+        : (dxfData.lines && dxfData.lines.length > 0 && dxfData.lines[0].length >= 3) ? dxfData.lines[0]
+        : null;
+      if (firstPoint) {
+        this.establishWorldOrigin({
+          minX: firstPoint[0], maxX: firstPoint[0],
+          minY: firstPoint[1], maxY: firstPoint[1],
+          minZ: firstPoint[2], maxZ: firstPoint[2]
+        });
+      }
+    }
+
     // Estilo propio de esta capa (color/opacidad independientes del resto de
     // superficies DXF cargadas). Si el nombre de capa ya tenía un estilo
     // asignado antes en esta sesión (ej. se reimportó el mismo archivo), se
@@ -1962,7 +2128,16 @@ class GeometScene {
     // 1. Renderizar Caras (Triángulos de superficies/TIN)
     if (dxfData.triangles && dxfData.triangles.length > 0) {
       const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.Float32BufferAttribute(dxfData.triangles, 3));
+      // Copia con worldOrigin restado (NO se muta dxfData.triangles: el
+      // bloque de auto-foco más abajo todavía necesita las coordenadas
+      // reales) — ver comentario extenso de worldOrigin en el constructor.
+      const localTriangles = new Float32Array(dxfData.triangles.length);
+      for (let k = 0; k < dxfData.triangles.length; k += 3) {
+        localTriangles[k] = dxfData.triangles[k] - this.worldOrigin.x;
+        localTriangles[k + 1] = dxfData.triangles[k + 1] - this.worldOrigin.y;
+        localTriangles[k + 2] = dxfData.triangles[k + 2] - this.worldOrigin.z;
+      }
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(localTriangles, 3));
       geom.computeVertexNormals();
 
       // Material de topografía semi-translúcido con iluminación. Color y
@@ -2002,7 +2177,15 @@ class GeometScene {
       
       dxfData.lines.forEach(lineCoords => {
         const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.Float32BufferAttribute(lineCoords, 3));
+        // Copia con worldOrigin restado — mismo criterio que los triángulos
+        // más arriba (no se muta lineCoords).
+        const localLine = new Float32Array(lineCoords.length);
+        for (let k = 0; k < lineCoords.length; k += 3) {
+          localLine[k] = lineCoords[k] - this.worldOrigin.x;
+          localLine[k + 1] = lineCoords[k + 1] - this.worldOrigin.y;
+          localLine[k + 2] = lineCoords[k + 2] - this.worldOrigin.z;
+        }
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(localLine, 3));
         const line = new THREE.Line(geom, lineMat);
         layerGroup.add(line);
       });
@@ -2097,10 +2280,16 @@ class GeometScene {
       const thickness = thicknessEl ? parseFloat(thicknessEl.value) : 5;
 
       if (!isNaN(coord) && !isNaN(thickness)) {
-        let axisNormal;
-        if (type === 'vertical-n') axisNormal = new THREE.Vector3(1, 0, 0);       // Eje X
-        else if (type === 'vertical-e') axisNormal = new THREE.Vector3(0, 1, 0);  // Eje Y
-        else axisNormal = new THREE.Vector3(0, 0, 1);                            // Eje Z (Planta)
+        // La geometría DXF ahora vive en espacio LOCAL (worldOrigin restado
+        // en addDxfLayer() — ver comentario extenso en el constructor), así
+        // que `coord` (real, tal como viene del slider) hay que convertirlo
+        // a LOCAL restando la componente de worldOrigin del eje
+        // correspondiente antes de usarlo como constante del plano.
+        // thickness es una distancia (diferencia), no necesita ajuste.
+        let axisNormal, localCoord;
+        if (type === 'vertical-n') { axisNormal = new THREE.Vector3(1, 0, 0); localCoord = coord - this.worldOrigin.x; }       // Eje X
+        else if (type === 'vertical-e') { axisNormal = new THREE.Vector3(0, 1, 0); localCoord = coord - this.worldOrigin.y; } // Eje Y
+        else { axisNormal = new THREE.Vector3(0, 0, 1); localCoord = coord - this.worldOrigin.z; }                           // Eje Z (Planta)
 
         // Dos planos formando una "rebanada" (slab): normal apuntando hacia
         // valores crecientes mantiene coord >= min; su inverso mantiene
@@ -2108,8 +2297,8 @@ class GeometScene {
         // negativas de todos los planos (clipIntersection=false), o sea que
         // un punto sobrevive solo si está del lado positivo de AMBOS planos —
         // exactamente la intersección [min, max] que se busca.
-        const planeMin = new THREE.Plane(axisNormal.clone(), -(coord - thickness));
-        const planeMax = new THREE.Plane(axisNormal.clone().negate(), (coord + thickness));
+        const planeMin = new THREE.Plane(axisNormal.clone(), -(localCoord - thickness));
+        const planeMax = new THREE.Plane(axisNormal.clone().negate(), (localCoord + thickness));
         planes = [planeMin, planeMax];
       }
     }

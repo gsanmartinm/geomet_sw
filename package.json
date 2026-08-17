@@ -1,0 +1,42 @@
+{
+  "name": "geomet-desktop",
+  "version": "1.0.7",
+  "private": true,
+  "description": "GeoMet V1 — visor 3D de geometalurgia. Este package.json empaqueta la MISMA app web (index.html/index.css/js) como ejecutable de Windows con Electron; no la modifica ni la duplica. Ver README-DESKTOP.md.",
+  "main": "electron-main.js",
+  "author": "Geomet Software",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.geomet.desktop",
+    "productName": "GeoMet",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "electron-main.js",
+      "index.html",
+      "index.css",
+      "favicon.svg",
+      "js/**/*",
+      "package.json",
+      "!**/*.md"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

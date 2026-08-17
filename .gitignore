@@ -8,3 +8,9 @@ data/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# App de escritorio (Electron) — ver README-DESKTOP.md. node_modules y el
+# instalador generado son pesados y se regeneran localmente con
+# "npm install" / "npm run dist", no deben subirse al repo.
+node_modules/
+dist-desktop/
