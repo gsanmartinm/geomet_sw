@@ -2333,6 +2333,110 @@ class GeometScene {
     }
   }
 
+  /**
+   * Genera el texto completo de un archivo DXF (ASCII, encabezado mínimo
+   * R12 + sección ENTITIES) a partir de una o más capas DXF YA CARGADAS en
+   * la escena — no vuelve a leer ningún archivo original. Pensado sobre
+   * todo para el flujo: importar una porción de un DXF muy pesado usando
+   * "Recortar al Área de Interés" (ver runDXFImport() en importer.js), y
+   * después guardar esa porción ya recortada como un .dxf chico y liviano,
+   * para reimportarlo directamente la próxima vez sin volver a procesar el
+   * archivo gigante original.
+   *
+   * La geometría se extrae directamente de las mallas Three.js de
+   * this.dxfMeshes, que viven en espacio LOCAL (worldOrigin restado — ver
+   * comentario extenso de worldOrigin en el constructor); acá se le vuelve
+   * a sumar worldOrigin para escribir coordenadas reales (UTM) en el
+   * archivo exportado. Como worldOrigin es un THREE.Vector3 de precisión
+   * completa (no un Float32Array) y los valores locales son chicos (por
+   * eso tienen buena precisión en float32), el resultado es tan preciso o
+   * más que si se hubiera exportado directamente desde las coordenadas
+   * float32 originales.
+   *
+   * Formato de salida por tipo de geometría:
+   *   - Caras (Mesh, geometría "triangle soup" sin índices): cada grupo de
+   *     3 vértices se escribe como una entidad 3DFACE (4to punto = 3ro,
+   *     convención estándar DXF para una cara triangular).
+   *   - Líneas/polilíneas (THREE.Line — NO el wireframe de contorno de las
+   *     superficies, que es THREE.LineSegments y se excluye a propósito):
+   *     se escriben como POLYLINE clásico + VERTEX por punto + SEQEND, en
+   *     vez de LWPOLYLINE, porque preserva coordenadas Z arbitrarias por
+   *     vértice (LWPOLYLINE en este parser solo admite una elevación
+   *     constante por entidad) — soporta tanto un LINE original (2 puntos)
+   *     como una LWPOLYLINE/POLYLINE original (N puntos) sin distinción.
+   *
+   * @param {string[]} layerNames Nombres de capas DXF a incluir (deben existir en this.dxfMeshes).
+   * @returns {string} Contenido completo del archivo .dxf, listo para descargar.
+   */
+  buildDxfExportText(layerNames) {
+    const out = [];
+    const push = (code, val) => { out.push(String(code), String(val)); };
+    // 4 decimales (sub-centímetro) alcanza de sobra para datos mineros y
+    // evita arrastrar ruido de precisión float32 en la cola decimal.
+    const fmt = (n) => n.toFixed(4);
+
+    // Encabezado mínimo R12 — no lo necesita nuestro propio parser (que solo
+    // lee la sección ENTITIES), pero mejora la compatibilidad si el archivo
+    // se abre en otro software DXF.
+    push(0, 'SECTION');
+    push(2, 'HEADER');
+    push(9, '$ACADVER');
+    push(1, 'AC1009');
+    push(0, 'ENDSEC');
+
+    push(0, 'SECTION');
+    push(2, 'ENTITIES');
+
+    layerNames.forEach(layerName => {
+      const layerGroup = this.dxfMeshes[layerName];
+      if (!layerGroup) return;
+
+      layerGroup.children.forEach(child => {
+        if (child.isMesh) {
+          // Caras triangulares: geometría "triangle soup" (sin índices), 9
+          // floats (3 vértices x XYZ) por triángulo — ver addDxfLayer().
+          const arr = child.geometry.attributes.position.array;
+          for (let i = 0; i + 8 < arr.length; i += 9) {
+            const x0 = arr[i] + this.worldOrigin.x, y0 = arr[i + 1] + this.worldOrigin.y, z0 = arr[i + 2] + this.worldOrigin.z;
+            const x1 = arr[i + 3] + this.worldOrigin.x, y1 = arr[i + 4] + this.worldOrigin.y, z1 = arr[i + 5] + this.worldOrigin.z;
+            const x2 = arr[i + 6] + this.worldOrigin.x, y2 = arr[i + 7] + this.worldOrigin.y, z2 = arr[i + 8] + this.worldOrigin.z;
+            push(0, '3DFACE');
+            push(8, layerName);
+            push(10, fmt(x0)); push(20, fmt(y0)); push(30, fmt(z0));
+            push(11, fmt(x1)); push(21, fmt(y1)); push(31, fmt(z1));
+            push(12, fmt(x2)); push(22, fmt(y2)); push(32, fmt(z2));
+            push(13, fmt(x2)); push(23, fmt(y2)); push(33, fmt(z2)); // 4to punto = 3ro (cara triangular)
+          }
+        } else if (child.isLine && !child.isLineSegments) {
+          // Contorno/polilínea real (isLineSegments excluye el wireframe
+          // auto-generado del TIN, que también es "isLine" por herencia
+          // pero NO debe exportarse como entidades propias).
+          const arr = child.geometry.attributes.position.array;
+          const vertexCount = arr.length / 3;
+          if (vertexCount < 2) return;
+
+          push(0, 'POLYLINE');
+          push(8, layerName);
+          push(70, 8); // bandera "polilínea 3D" — bit de cierre (valor 1) queda en 0 a propósito, ver comentario de clase
+          for (let v = 0; v < vertexCount; v++) {
+            const idx = v * 3;
+            const x = arr[idx] + this.worldOrigin.x;
+            const y = arr[idx + 1] + this.worldOrigin.y;
+            const z = arr[idx + 2] + this.worldOrigin.z;
+            push(0, 'VERTEX');
+            push(10, fmt(x)); push(20, fmt(y)); push(30, fmt(z));
+          }
+          push(0, 'SEQEND');
+        }
+      });
+    });
+
+    push(0, 'ENDSEC');
+    push(0, 'EOF');
+
+    return out.join('\n');
+  }
+
   // ==========================================
   // RAYCASTING Y TOOLTIPS
   // ==========================================

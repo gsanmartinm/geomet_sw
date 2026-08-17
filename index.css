@@ -1379,6 +1379,13 @@ input:checked + .slider:before {
   align-items: center;
   gap: 8px;
 }
+/* Agrupa los botones de acción (ej. exportar DXF + eliminar) a la derecha
+   del nodo — ver createTreeNode() en app.js. */
+.tree-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .tree-node-left input[type="checkbox"] {
   accent-color: var(--accent-cyan);
 }

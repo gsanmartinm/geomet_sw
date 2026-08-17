@@ -1014,7 +1014,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=11');
+    this.worker = new Worker('js/worker-parser.js?v=12');
     
     const t0 = performance.now();
     
@@ -1851,6 +1851,51 @@ class GeometApp {
     this.logConsole('info', `${dxfKeys.length} capa(s) DXF eliminada(s) de la sesión.`);
   }
 
+  /**
+   * Descarga UNA capa DXF actualmente cargada como un archivo .dxf nuevo,
+   * reconstruyendo coordenadas reales desde la geometría YA importada (ver
+   * scene.buildDxfExportText()). Pensado sobre todo para el flujo: importar
+   * un DXF muy pesado con "Recortar al Área de Interés" activo, y guardar
+   * esa porción recortada como un archivo chico para reimportarlo
+   * directamente la próxima vez, sin repetir el procesamiento del archivo
+   * original completo.
+   */
+  exportDxfLayer(layerName) {
+    const text = this.scene.buildDxfExportText([layerName]);
+    this._downloadDxfText(text, `GeoMet_${this._sanitizeFileName(layerName)}`);
+    this.logConsole('success', `Capa DXF "${layerName}" exportada como archivo .dxf.`);
+    this.showToast('success', `Capa "${layerName}" exportada como DXF.`);
+  }
+
+  /** Igual que exportDxfLayer(), pero junta TODAS las capas DXF cargadas en un solo archivo .dxf. */
+  exportAllDxfLayers() {
+    const layerNames = Object.keys(this.scene.dxfMeshes);
+    if (layerNames.length === 0) return;
+    const text = this.scene.buildDxfExportText(layerNames);
+    this._downloadDxfText(text, 'GeoMet_TodasLasCapasDXF');
+    this.logConsole('success', `${layerNames.length} capa(s) DXF exportadas en un solo archivo .dxf.`);
+    this.showToast('success', 'Capas DXF exportadas.');
+  }
+
+  /** Reemplaza cualquier caracter que no sea seguro para nombre de archivo por "_". */
+  _sanitizeFileName(name) {
+    return name.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  }
+
+  /** Dispara la descarga de un archivo .dxf de texto plano, con timestamp en el nombre. */
+  _downloadDxfText(text, baseName) {
+    const blob = new Blob([text], { type: 'application/dxf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `${baseName}_${ts}.dxf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   // ==========================================
   // CAPAS TREE VIEW
   // ==========================================
@@ -1890,7 +1935,9 @@ class GeometApp {
       hasLayers = true;
       const dxfRoot = this.createTreeNode(tree, 'Superficies DXF', true, (chk) => {
         this.scene.dxfGroup.visible = chk;
-      }, () => this.removeAllDxfLayers());
+      }, () => this.removeAllDxfLayers(), [
+        { icon: '⬇', title: 'Exportar TODAS las capas DXF cargadas en un solo archivo .dxf', onClick: () => this.exportAllDxfLayers() }
+      ]);
 
       const childrenContainer = document.createElement('div');
       childrenContainer.className = 'tree-children';
@@ -1899,7 +1946,9 @@ class GeometApp {
       dxfKeys.forEach(layerName => {
         this.createTreeNode(childrenContainer, `Capa: ${layerName}`, true, (chk) => {
           this.scene.toggleLayerVisibility(layerName, chk);
-        }, () => this.removeDxfLayerByName(layerName));
+        }, () => this.removeDxfLayerByName(layerName), [
+          { icon: '⬇', title: `Exportar la capa "${layerName}" como archivo .dxf (útil para guardar un recorte y reimportarlo liviano más adelante)`, onClick: () => this.exportDxfLayer(layerName) }
+        ]);
       });
     }
     
@@ -1982,8 +2031,11 @@ class GeometApp {
    *   capa de la sesión por completo (libera datos/mesh, no solo la oculta).
    *   Pide confirmación antes de ejecutar, ya que no hay forma de deshacerlo
    *   sin volver a importar el archivo.
+   * @param {Array<{icon:string, title:string, onClick:Function}>} [extraActions]
+   *   Botones adicionales opcionales entre el checkbox y el botón de eliminar
+   *   (ej. "Exportar como DXF" en los nodos de capas DXF — ver updateLayersTree()).
    */
-  createTreeNode(parent, name, defaultChecked, onChangeCallback, onDeleteCallback) {
+  createTreeNode(parent, name, defaultChecked, onChangeCallback, onDeleteCallback, extraActions) {
     const node = document.createElement('div');
     node.className = 'tree-node';
 
@@ -2005,18 +2057,44 @@ class GeometApp {
     left.appendChild(label);
     content.appendChild(left);
 
-    if (onDeleteCallback) {
-      const btnDelete = document.createElement('button');
-      btnDelete.className = 'btn-icon';
-      btnDelete.innerText = '✕';
-      btnDelete.title = `Eliminar "${name}" de la sesión`;
-      btnDelete.addEventListener('click', (e) => {
-        e.stopPropagation(); // no togglear el checkbox al hacer click en el botón
-        if (confirm(`¿Eliminar "${name}" de la sesión? Vas a tener que volver a importarlo si lo necesitás de nuevo.`)) {
-          onDeleteCallback();
-        }
-      });
-      content.appendChild(btnDelete);
+    // Todos los botones de acción (extras + eliminar) van agrupados en un
+    // único contenedor "right" — content usa justify-content:space-between
+    // esperando exactamente 2 hijos (left y right); si los botones se
+    // agregaran sueltos directo a content, con 3+ hijos quedarían repartidos
+    // de forma pareja en vez de agrupados a la derecha.
+    if (extraActions || onDeleteCallback) {
+      const right = document.createElement('div');
+      right.className = 'tree-node-actions';
+
+      if (extraActions) {
+        extraActions.forEach(action => {
+          const btnAction = document.createElement('button');
+          btnAction.className = 'btn-icon';
+          btnAction.innerText = action.icon;
+          btnAction.title = action.title;
+          btnAction.addEventListener('click', (e) => {
+            e.stopPropagation(); // no togglear el checkbox al hacer click en el botón
+            action.onClick();
+          });
+          right.appendChild(btnAction);
+        });
+      }
+
+      if (onDeleteCallback) {
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'btn-icon';
+        btnDelete.innerText = '✕';
+        btnDelete.title = `Eliminar "${name}" de la sesión`;
+        btnDelete.addEventListener('click', (e) => {
+          e.stopPropagation(); // no togglear el checkbox al hacer click en el botón
+          if (confirm(`¿Eliminar "${name}" de la sesión? Vas a tener que volver a importarlo si lo necesitás de nuevo.`)) {
+            onDeleteCallback();
+          }
+        });
+        right.appendChild(btnDelete);
+      }
+
+      content.appendChild(right);
     }
 
     node.appendChild(content);
