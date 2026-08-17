@@ -3,7 +3,12 @@
 
 // DxfParser vive en su propio archivo (compartido con el resto de la app);
 // lo importamos aquí para poder parsear DXF dentro del worker (ver parseDxf()).
-importScripts('dxf-parser.js');
+// ?v=11: mismo mecanismo de cache-busting que el resto de los scripts (ver
+// comentario en index.html) — sin esto, el navegador podía seguir sirviendo
+// una copia vieja de dxf-parser.js indefinidamente, ya que importScripts()
+// no se beneficiaba del "?v=N" que sí fuerza la recarga de worker-parser.js
+// mismo (ver this.worker = new Worker(...) en app.js).
+importScripts('dxf-parser.js?v=11');
 
 self.onmessage = function(e) {
   const { action, payload } = e.data;
@@ -1320,57 +1325,82 @@ function readAndParseDxfChunked(file, state, onProgress) {
 }
 
 function parseDxf(payload) {
-  const { file } = payload;
+  const { file, cropBounds } = payload;
   const warnings = [];
   const errors = [];
 
   postMessage({ type: 'progress', percent: 2, message: `Leyendo ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) en trozos...` });
 
-  const state = DxfParser.createStreamParser();
+  // cropBounds (opcional, {minX,maxX,minY,maxY}) viene del switch "Recortar
+  // al Área de Interés" del modal de importación (ver runDXFImport() en
+  // importer.js). Se lo pasa al parser para que descarte, entidad por
+  // entidad, todo lo que caiga fuera del rectángulo ANTES de guardarlo en
+  // memoria — ver DxfStreamState en dxf-parser.js. Esto es lo que permite
+  // importar solo la zona de interés de un DXF muy extenso, y de paso evita
+  // el "RangeError: Invalid array length" que un archivo con demasiada
+  // geometría en una sola capa puede producir al convertir un array plano
+  // gigante a Float32Array más abajo.
+  const state = DxfParser.createStreamParser(cropBounds);
+  const layers = {};
+  const transferableList = [];
+  let layerCount = 0, triCount = 0, lineCount = 0;
   try {
     readAndParseDxfChunked(file, state, (offset, total) => {
       const pct = Math.floor(2 + (offset / total) * 88); // 2% -> 90%
       postMessage({ type: 'progress', percent: pct, message: `Leyendo e interpretando DXF: ${(offset / 1024 / 1024).toFixed(0)} MB de ${(total / 1024 / 1024).toFixed(0)} MB...` });
     });
+
+    const rawLayers = state.layers;
+
+    postMessage({ type: 'progress', percent: 92, message: 'Codificando geometría a buffers transferibles...' });
+
+    // Convertir cada capa a Float32Array (las triangles salen de DxfParser
+    // como array plano normal) y juntar todos los ArrayBuffers para
+    // transferencia sin copia (zero-copy) de vuelta al hilo principal. Esta
+    // conversión es el otro punto (además del acumulado dentro de
+    // readAndParseDxfChunked, arriba) donde una capa con demasiada geometría
+    // puede disparar "Invalid array length" — por eso queda dentro del mismo
+    // try/catch.
+    for (const name in rawLayers) {
+      const l = rawLayers[name];
+      if (l.triangles.length === 0 && l.lines.length === 0) continue;
+
+      const trianglesArr = new Float32Array(l.triangles);
+      transferableList.push(trianglesArr.buffer);
+      l.lines.forEach(lineBuf => transferableList.push(lineBuf.buffer));
+
+      layers[name] = { triangles: trianglesArr, lines: l.lines, sourceFileName: file.name };
+      layerCount++;
+      triCount += trianglesArr.length / 9; // 3 vértices * 3 coords
+      lineCount += l.lines.length;
+    }
   } catch (err) {
-    errors.push({ msg: `Error al leer/parsear el archivo DXF: ${err.message}` });
+    // Mensaje de ayuda específico para "Invalid array length": el usuario no
+    // tiene forma de adivinar, a partir de ese mensaje genérico del motor JS,
+    // que la causa es demasiada geometría en una sola capa ni que existe el
+    // recorte por área como solución — se lo indicamos acá explícitamente.
+    let msg = `Error al leer/parsear el archivo DXF: ${err.message}`;
+    if (err instanceof RangeError && /invalid array length/i.test(err.message)) {
+      msg += cropBounds
+        ? ' — incluso dentro del área de recorte indicada, esa zona tiene demasiada geometría en una sola capa. Pruebe acotando aún más el rectángulo de recorte.'
+        : ' — el archivo tiene demasiada geometría en una sola capa para procesarla de una vez (típico en DXF de varios GB). Pruebe activando "Recortar al Área de Interés" en el importador para limitar la importación a la zona que necesita.';
+    }
+    errors.push({ msg });
     postMessage({ type: 'error', errors, warnings });
     return;
   }
-  const rawLayers = state.layers;
-
-  postMessage({ type: 'progress', percent: 92, message: 'Codificando geometría a buffers transferibles...' });
-
-  // Convertir cada capa a Float32Array (las triangles salen de DxfParser como
-  // array plano normal) y juntar todos los ArrayBuffers para transferencia
-  // sin copia (zero-copy) de vuelta al hilo principal.
-  const layers = {};
-  const transferableList = [];
-  let layerCount = 0, triCount = 0, lineCount = 0;
-
-  for (const name in rawLayers) {
-    const l = rawLayers[name];
-    if (l.triangles.length === 0 && l.lines.length === 0) continue;
-
-    const trianglesArr = new Float32Array(l.triangles);
-    transferableList.push(trianglesArr.buffer);
-    l.lines.forEach(lineBuf => transferableList.push(lineBuf.buffer));
-
-    layers[name] = { triangles: trianglesArr, lines: l.lines, sourceFileName: file.name };
-    layerCount++;
-    triCount += trianglesArr.length / 9; // 3 vértices * 3 coords
-    lineCount += l.lines.length;
-  }
 
   if (layerCount === 0) {
-    warnings.push({ msg: 'El DXF se leyó completo pero no se encontraron entidades soportadas (3DFACE, LINE, LWPOLYLINE o POLYLINE) dentro de una sección ENTITIES. Verifique que el archivo no dependa de BLOCKS/INSERT (aún no soportado) y que use estas entidades.' });
+    warnings.push({ msg: cropBounds
+      ? 'El DXF se leyó completo pero no se encontraron entidades soportadas (3DFACE, LINE, LWPOLYLINE o POLYLINE) dentro del área de recorte indicada. Verifique las coordenadas del recorte, o que el archivo no dependa de BLOCKS/INSERT (aún no soportado).'
+      : 'El DXF se leyó completo pero no se encontraron entidades soportadas (3DFACE, LINE, LWPOLYLINE o POLYLINE) dentro de una sección ENTITIES. Verifique que el archivo no dependa de BLOCKS/INSERT (aún no soportado) y que use estas entidades.' });
   }
 
   postMessage({ type: 'progress', percent: 100, message: 'DXF procesado.' });
 
   postMessage({
     type: 'complete',
-    data: { layers, layerCount, triCount, lineCount },
+    data: { layers, layerCount, triCount, lineCount, skippedByCrop: state.skippedByCrop, cropApplied: !!cropBounds },
     warnings,
     errors
   }, transferableList);

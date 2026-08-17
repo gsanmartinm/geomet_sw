@@ -1014,7 +1014,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=10');
+    this.worker = new Worker('js/worker-parser.js?v=11');
     
     const t0 = performance.now();
     
@@ -1380,6 +1380,14 @@ class GeometApp {
       this.logConsole('success', `DXF importado. Capas: ${data.layerCount}, Caras: ${data.triCount.toLocaleString()}, Polilíneas: ${data.lineCount.toLocaleString()}`);
     } else {
       this.logConsole('warn', 'DXF leído pero no se importó ninguna capa (ver advertencia anterior con el detalle).');
+    }
+
+    // Si se usó "Recortar al Área de Interés" (ver runDXFImport() en
+    // importer.js), informar cuánta geometría quedó fuera del área — así el
+    // usuario confirma que el recorte realmente se aplicó y tiene una idea
+    // de cuánto del archivo original se dejó afuera.
+    if (data.cropApplied && data.skippedByCrop > 0) {
+      this.logConsole('info', `Recorte por área: se omitieron ${data.skippedByCrop.toLocaleString()} entidades fuera del rectángulo indicado.`);
     }
 
     // Fusionar los bounds de las superficies DXF recién agregadas con los de

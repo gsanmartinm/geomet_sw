@@ -27,9 +27,16 @@ class DxfParser {
    *
    * Ver parseDxf() en worker-parser.js para el lector en trozos que alimenta
    * esta clase.
+   *
+   * @param {Object|null} [cropBounds] Rectángulo opcional {minX,maxX,minY,maxY}
+   *   (Este/Norte) para descartar, entidad por entidad, toda la geometría
+   *   fuera de esa área ANTES de guardarla en memoria — ver "Recortar al
+   *   Área de Interés" en el modal de importación (importer.js) y
+   *   DxfParser._entityPassesCrop() más abajo. `null`/`undefined` (caso por
+   *   defecto) importa todo el archivo, sin recorte, igual que antes.
    */
-  static createStreamParser() {
-    return new DxfStreamState();
+  static createStreamParser(cropBounds) {
+    return new DxfStreamState(cropBounds);
   }
 
   /**
@@ -51,9 +58,37 @@ class DxfParser {
   }
 
   /**
-   * Guarda las coordenadas de la entidad procesada en la estructura de capas de Three.js
+   * true si al menos uno de los puntos de la entidad cae dentro del
+   * rectángulo `cropBounds` (Este/Norte) — basta con UN vértice adentro para
+   * conservar la entidad completa, en vez de exigir que estén todos, así una
+   * cara/segmento que cruza el borde del recorte no deja un "diente" faltante
+   * justo en el límite del área importada. `cropBounds` null/undefined
+   * (sin recorte activo) siempre pasa.
    */
-  static _saveEntity(type, layerName, pts, isClosed, elevation, getLayer) {
+  static _entityPassesCrop(pts, cropBounds) {
+    if (!cropBounds) return true;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!p) continue;
+      if (p.x >= cropBounds.minX && p.x <= cropBounds.maxX &&
+          p.y >= cropBounds.minY && p.y <= cropBounds.maxY) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Guarda las coordenadas de la entidad procesada en la estructura de capas
+   * de Three.js — o la descarta sin guardar nada si cropBounds está definido
+   * y ningún punto de la entidad cae dentro del área (ver _entityPassesCrop).
+   */
+  static _saveEntity(type, layerName, pts, isClosed, elevation, getLayer, cropBounds, skipCounter) {
+    if (!DxfParser._entityPassesCrop(pts, cropBounds)) {
+      if (skipCounter) skipCounter.count++;
+      return;
+    }
+
     const layer = getLayer(layerName);
 
     if (type === '3DFACE' && pts.length >= 3) {
@@ -111,11 +146,19 @@ class DxfParser {
  * array completo), para poder alimentarla desde una lectura en trozos.
  */
 class DxfStreamState {
-  constructor() {
+  /**
+   * @param {Object|null} [cropBounds] Ver DxfParser.createStreamParser().
+   */
+  constructor(cropBounds) {
     this.layers = {};
     // Closure reutilizada para no crear una función nueva en cada llamada a
     // _saveEntity (esto puede ejecutarse millones de veces en un DXF grande).
     this._getLayerFn = (name) => this._getLayer(name);
+
+    this.cropBounds = cropBounds || null;
+    // Objeto (no un número suelto) para poder pasarlo por referencia a
+    // _saveEntity y que incremente el mismo contador en cada llamada.
+    this._skipCounter = { count: 0 };
 
     // Nivel superior: buscando "0 SECTION", o ya dentro de una sección
     // buscando "2 ENTITIES" (para entrar) o "0 ENDSEC" (para salir).
@@ -147,9 +190,14 @@ class DxfStreamState {
     return this.layers[layerName];
   }
 
+  /** Cantidad de entidades descartadas por caer fuera de cropBounds (0 si no hay recorte activo). */
+  get skippedByCrop() {
+    return this._skipCounter.count;
+  }
+
   _saveCurrentEntity() {
     if (this.currentEntity) {
-      DxfParser._saveEntity(this.currentEntity, this.layerName, this.tempPoints, this.isClosed, this.elevation, this._getLayerFn);
+      DxfParser._saveEntity(this.currentEntity, this.layerName, this.tempPoints, this.isClosed, this.elevation, this._getLayerFn, this.cropBounds, this._skipCounter);
     }
   }
 
@@ -286,7 +334,7 @@ class DxfStreamState {
       this.curVertexPt = { x: 0, y: 0, z: 0 };
       this.polylineMode = 'IN_VERTEX';
     } else if (vCode === 0 && vVal === 'SEQEND') {
-      DxfParser._saveEntity('POLYLINE', this.polylineLayer, this.tempPoints, this.polylineClosed, 0, this._getLayerFn);
+      DxfParser._saveEntity('POLYLINE', this.polylineLayer, this.tempPoints, this.polylineClosed, 0, this._getLayerFn, this.cropBounds, this._skipCounter);
       this.currentEntity = null;
       this.tempPoints = [];
       this.polylineMode = null;
@@ -305,7 +353,7 @@ class DxfStreamState {
       this.tempPoints.push(this.curVertexPt);
     }
     if (this.currentEntity) {
-      DxfParser._saveEntity(this.currentEntity, this.layerName, this.tempPoints, this.isClosed, this.elevation, this._getLayerFn);
+      DxfParser._saveEntity(this.currentEntity, this.layerName, this.tempPoints, this.isClosed, this.elevation, this._getLayerFn, this.cropBounds, this._skipCounter);
     }
   }
 }

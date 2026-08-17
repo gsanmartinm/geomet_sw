@@ -91,6 +91,17 @@ class GeometImporter {
       });
     }
 
+    // Recorte por área (Este/Norte) del importador DXF: habilita/deshabilita
+    // visualmente los 4 campos numéricos según el switch — ver runDXFImport(),
+    // que solo lee estos campos si el switch está activo.
+    const chkDxfCrop = document.getElementById('chk-dxf-crop-active');
+    const dxfCropControls = document.getElementById('dxf-crop-controls-container');
+    if (chkDxfCrop && dxfCropControls) {
+      chkDxfCrop.addEventListener('change', () => {
+        dxfCropControls.classList.toggle('disabled-overlay', !chkDxfCrop.checked);
+      });
+    }
+
     // Guardar plantilla
     const btnSaveTmpl = document.getElementById('btn-save-template');
     if (btnSaveTmpl) {
@@ -122,6 +133,7 @@ class GeometImporter {
       genFileGroup.classList.add('hidden');
       dhMultiGroup.classList.remove('hidden');
       startRowGroup.classList.remove('hidden');
+      document.getElementById('dxf-crop-group').classList.add('hidden');
     } else if (type === 'dxf') {
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
@@ -129,6 +141,7 @@ class GeometImporter {
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo DXF";
       document.getElementById('csv-file-input').accept = ".dxf";
       document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo DXF aquí o haz clic para buscar";
+      document.getElementById('dxf-crop-group').classList.remove('hidden');
     } else if (type === 'samples') {
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
@@ -136,6 +149,7 @@ class GeometImporter {
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV de Muestras Metalúrgicas";
       document.getElementById('csv-file-input').accept = ".csv,.txt";
       document.getElementById('drop-msg-text').innerText = "Arrastra tu archivo CSV aquí o haz clic para buscar";
+      document.getElementById('dxf-crop-group').classList.add('hidden');
     } else { // blocks
       genFileGroup.classList.remove('hidden');
       dhMultiGroup.classList.add('hidden');
@@ -143,6 +157,7 @@ class GeometImporter {
       document.getElementById('lbl-file-input').innerText = "Seleccionar Archivo CSV/ASC de Bloques";
       document.getElementById('csv-file-input').accept = ".csv,.txt,.asc";
       document.getElementById('drop-msg-text').innerText = "Arrastre su archivo CSV o ASC aquí o haga clic para buscar";
+      document.getElementById('dxf-crop-group').classList.add('hidden');
     }
 
     this.updateModalButtons();
@@ -156,6 +171,15 @@ class GeometImporter {
       const el = document.getElementById(`csv-${st}`);
       if (el) el.value = "";
     });
+
+    // Desactivar el recorte por área del importador DXF al cerrar el modal
+    // (no reseteamos los valores numéricos, por si el usuario vuelve a
+    // importar el mismo archivo con el mismo recorte) — así nunca queda
+    // activo "en silencio" para una importación de DXF distinta más adelante.
+    const chkDxfCrop = document.getElementById('chk-dxf-crop-active');
+    if (chkDxfCrop) chkDxfCrop.checked = false;
+    const dxfCropControls = document.getElementById('dxf-crop-controls-container');
+    if (dxfCropControls) dxfCropControls.classList.add('disabled-overlay');
     
     this.modalFiles = { collar: null, survey: null, assays: null, geology: null, blocks: null, samples: null, dxf: null };
   }
@@ -767,7 +791,36 @@ class GeometImporter {
   // ==========================================
   runDXFImport() {
     const file = this.modalFiles.dxf;
+
+    // Recorte por área (Este/Norte), opcional — ver el bloque "dxf-crop-group"
+    // en index.html. Se lee ACÁ, antes de closeImportModal() (que resetea el
+    // switch), y se valida que los 4 campos estén completos y formen un
+    // rectángulo no degenerado antes de aplicarlo; si algo no calza, se
+    // avisa y se cancela la importación en vez de importar sin el recorte
+    // pedido en silencio.
+    let cropBounds = null;
+    const chkCrop = document.getElementById('chk-dxf-crop-active');
+    if (chkCrop && chkCrop.checked) {
+      const minX = parseFloat(document.getElementById('dxf-crop-min-x').value);
+      const maxX = parseFloat(document.getElementById('dxf-crop-max-x').value);
+      const minY = parseFloat(document.getElementById('dxf-crop-min-y').value);
+      const maxY = parseFloat(document.getElementById('dxf-crop-max-y').value);
+
+      if (isNaN(minX) || isNaN(maxX) || isNaN(minY) || isNaN(maxY)) {
+        alert('El recorte por área está activado pero faltan valores. Complete los 4 campos (Este/Norte Mínimo/Máximo) o desactive el recorte.');
+        return;
+      }
+      if (minX >= maxX || minY >= maxY) {
+        alert('El recorte por área no es válido: el mínimo debe ser menor que el máximo, tanto en Este (X) como en Norte (Y).');
+        return;
+      }
+      cropBounds = { minX, maxX, minY, maxY };
+    }
+
     app.logConsole('info', `Iniciando parsing de DXF: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
+    if (cropBounds) {
+      app.logConsole('info', `Recorte por área activo: X [${cropBounds.minX}, ${cropBounds.maxX}], Y [${cropBounds.minY}, ${cropBounds.maxY}]. Solo se importará la geometría dentro de este rectángulo.`);
+    }
     this.closeImportModal();
 
     // El parseo se delega al Web Worker (igual que Bloques/Sondajes/Muestras):
@@ -777,8 +830,13 @@ class GeometImporter {
     // silencio (0 capas, sin ningún error) en vez de lanzar una excepción.
     // El worker lee el archivo en trozos pequeños (ver parseDxf() en
     // worker-parser.js), evitando ese límite sin importar el tamaño del DXF,
-    // y además libera al hilo principal/UI durante el parseo.
-    app.runWorkerParser('parse_dxf', { file });
+    // y además libera al hilo principal/UI durante el parseo. cropBounds (si
+    // se definió arriba) se aplica ENTIDAD POR ENTIDAD durante esa misma
+    // lectura — ver DxfStreamState en dxf-parser.js — así la geometría fuera
+    // del área nunca llega a guardarse en memoria, lo que además evita el
+    // error "Invalid array length" en archivos extensos con áreas de interés
+    // acotadas.
+    app.runWorkerParser('parse_dxf', { file, cropBounds });
   }
 
   runFinalImport() {
