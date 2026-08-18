@@ -643,6 +643,25 @@ body.light-mode #viewport-container {
   50% { box-shadow: 0 0 18px hsla(180, 100%, 50%, 0.55); }
 }
 
+/* Badge de modo activo de "Medir Distancia" — mismo patrón que
+   .planner-picking-badge/.coord-picker-badge, en ámbar (mismo tono que los
+   marcadores y la línea de la medición en el visor 3D, ver
+   updateMeasureMarkers()/updateMeasureLine() en scene.js) para que el color
+   del badge, los puntos y la línea se lean como "una misma herramienta". */
+.measure-tool-badge {
+  border-color: #f97316;
+  color: #f97316;
+  animation: measure-badge-pulse 1.6s ease-in-out infinite;
+}
+.measure-tool-dot {
+  background-color: #f97316;
+  box-shadow: 0 0 6px #f97316;
+}
+@keyframes measure-badge-pulse {
+  0%, 100% { box-shadow: 0 0 8px hsla(24, 95%, 53%, 0.25); }
+  50% { box-shadow: 0 0 18px hsla(24, 95%, 53%, 0.55); }
+}
+
 .fps-counter {
   font-family: var(--font-display);
 }

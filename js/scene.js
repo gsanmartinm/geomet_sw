@@ -166,6 +166,8 @@ class GeometScene {
     this.sampleMesh = null;      // THREE.Points de muestras metalúrgicas
     this.dxfMeshes = {};         // layerName -> THREE.Mesh / Line
     this.coordPickerMarkerMesh = null; // THREE.Points: marcadores rojos de "Identificar Coordenadas" (ver updateCoordPickerMarkers())
+    this.measureMarkerMesh = null;     // THREE.Points: marcadores ámbar de "Medir Distancia" (ver updateMeasureMarkers())
+    this.measureLineMesh = null;       // THREE.Line: línea (sólida o punteada) entre los 2 puntos de "Medir Distancia" (ver updateMeasureLine())
 
     this.drillholesGroup = new THREE.Group();
     this.dxfGroup = new THREE.Group();
@@ -2542,6 +2544,212 @@ class GeometScene {
     push(0, 'EOF');
 
     return out.join('\n');
+  }
+
+  /**
+   * Identifica el punto de medición bajo el cursor para la herramienta
+   * "Medir Distancia" (pestaña Vistas) — unifica el picking de las 4 capas
+   * de datos soportadas (ver toggleMeasureTool()/onMeasureClick() en
+   * app.js):
+   *   - Superficies DXF: snap al vértice más cercano de la triangulación
+   *     (mismo criterio que pickNearestVertexAtNDC(), usado también por
+   *     "Identificar Coordenadas" — dos herramientas distintas, mismo
+   *     comportamiento de "agarre" de un punto de topografía).
+   *   - Sondajes: el punto EXACTO donde impacta el rayo sobre la traza (no
+   *     se ajusta al collar ni al extremo de un intervalo) — así se puede
+   *     medir tanto desde el collar (clic arriba del pozo) como desde
+   *     cualquier profundidad intermedia, sin necesitar un modo aparte.
+   *   - Muestras Metalúrgicas: la muestra más cercana al cursor (nube de
+   *     puntos — THREE.Points.raycast() ya devuelve la posición real del
+   *     punto, no una interpolación).
+   *   - Modelo de Bloques: el centro real del bloque bajo el cursor — SOLO
+   *     disponible en modo "Cajas Sólidas" (this.renderMode === 'cubes'),
+   *     el mismo límite que ya tiene el tooltip de hover normal (ver
+   *     onMouseMove() más abajo) — el modo "Puntos" prioriza rendimiento
+   *     sobre picking preciso en modelos de 5M+ bloques.
+   *
+   * Si el rayo impacta más de un tipo de objeto, gana el más cercano a la
+   * cámara (intersectObjects ya devuelve resultados ordenados por
+   * distancia). Devuelve `{point: {x,y,z} REALES, type, label}` o `null` si
+   * no hay nada pickeable bajo el cursor.
+   */
+  pickMeasurementPointAtNDC(ndcX, ndcY) {
+    const mouse = new THREE.Vector2(ndcX, ndcY);
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    const dxfTargets = [];
+    Object.values(this.dxfMeshes).forEach(group => {
+      group.traverse(obj => { if (obj.isMesh) dxfTargets.push(obj); });
+    });
+
+    const drillholeTargets = [];
+    this.drillholesGroup.children.forEach(c => { if (c.visible) drillholeTargets.push(c); });
+
+    const targets = [...dxfTargets, ...drillholeTargets];
+    if (this.sampleMesh && this.sampleMesh.visible) targets.push(this.sampleMesh);
+    // Ver comentario del método: bloques solo son pickeables en modo "Cajas
+    // Sólidas" (InstancedMesh) — en modo "Puntos" no se agregan como target.
+    if (this.blockMesh && this.blockMesh.visible && this.renderMode === 'cubes') targets.push(this.blockMesh);
+
+    if (targets.length === 0) return null;
+
+    const intersects = this.raycaster.intersectObjects(targets, false);
+    if (intersects.length === 0) return null;
+
+    const hit = intersects[0];
+    const obj = hit.object;
+
+    // --- Superficies DXF: snap al vértice más cercano de la cara impactada ---
+    if (dxfTargets.includes(obj)) {
+      const face = hit.face;
+      const posAttr = obj.geometry ? obj.geometry.attributes.position : null;
+      let real = hit.point;
+      if (face && posAttr) {
+        const candidates = [face.a, face.b, face.c].map(idx => {
+          const v = new THREE.Vector3(posAttr.getX(idx), posAttr.getY(idx), posAttr.getZ(idx));
+          obj.localToWorld(v);
+          return v;
+        });
+        let nearest = candidates[0];
+        let nearestDist = hit.point.distanceToSquared(candidates[0]);
+        for (let i = 1; i < candidates.length; i++) {
+          const d = hit.point.distanceToSquared(candidates[i]);
+          if (d < nearestDist) { nearestDist = d; nearest = candidates[i]; }
+        }
+        real = nearest;
+      }
+      return {
+        point: { x: real.x + this.worldOrigin.x, y: real.y + this.worldOrigin.y, z: real.z + this.worldOrigin.z },
+        type: 'dxf',
+        label: 'Topografía DXF'
+      };
+    }
+
+    // --- Sondajes: punto exacto de impacto sobre la traza ---
+    if (drillholeTargets.includes(obj)) {
+      const instanceId = hit.instanceId;
+      const interval = (obj.userData && obj.userData.intervals && instanceId !== undefined) ? obj.userData.intervals[instanceId] : null;
+      const p = hit.point;
+      return {
+        point: { x: p.x + this.worldOrigin.x, y: p.y + this.worldOrigin.y, z: p.z + this.worldOrigin.z },
+        type: 'drillhole',
+        label: interval ? `Sondaje: ${interval.holeId}` : 'Sondaje'
+      };
+    }
+
+    // --- Muestras Metalúrgicas: la muestra bajo el cursor (posición real, sin interpolar) ---
+    if (obj === this.sampleMesh) {
+      const p = hit.point;
+      return {
+        point: { x: p.x + this.worldOrigin.x, y: p.y + this.worldOrigin.y, z: p.z + this.worldOrigin.z },
+        type: 'sample',
+        label: 'Muestra Metalúrgica'
+      };
+    }
+
+    // --- Modelo de Bloques (solo modo Cajas Sólidas): centro real del bloque ---
+    if (obj === this.blockMesh) {
+      const instanceId = hit.instanceId;
+      const realIdx = (obj.userData && obj.userData.realIndices && instanceId !== undefined) ? obj.userData.realIndices[instanceId] : null;
+      let point;
+      if (realIdx !== null && realIdx !== undefined && this.blockData && this.blockData.positions) {
+        const idx3 = realIdx * 3;
+        point = {
+          x: this.blockData.positions[idx3],
+          y: this.blockData.positions[idx3 + 1],
+          z: this.blockData.positions[idx3 + 2]
+        };
+      } else {
+        const p = hit.point;
+        point = { x: p.x + this.worldOrigin.x, y: p.y + this.worldOrigin.y, z: p.z + this.worldOrigin.z };
+      }
+      return { point, type: 'block', label: `Bloque${(realIdx !== null && realIdx !== undefined) ? ` #${realIdx.toLocaleString()}` : ''}` };
+    }
+
+    return null;
+  }
+
+  /**
+   * Dibuja un pequeño punto ámbar en el visor 3D por cada punto ya fijado de
+   * la medición activa (0, 1 o 2 puntos — ver onMeasureClick() en app.js).
+   * Mismo patrón que updateCoordPickerMarkers(), con color distinto (ámbar
+   * en vez de rojo) para diferenciar visualmente ambas herramientas por si
+   * llegaran a usarse una después de la otra sin limpiar la anterior.
+   */
+  updateMeasureMarkers(points) {
+    if (this.measureMarkerMesh) {
+      this.scene.remove(this.measureMarkerMesh);
+      this.measureMarkerMesh.geometry.dispose();
+      this.measureMarkerMesh.material.dispose();
+      this.measureMarkerMesh = null;
+    }
+    if (!points || points.length === 0) return;
+
+    const positions = new Float32Array(points.length * 3);
+    points.forEach((p, i) => {
+      positions[i * 3] = p.x - this.worldOrigin.x;
+      positions[i * 3 + 1] = p.y - this.worldOrigin.y;
+      positions[i * 3 + 2] = p.z - this.worldOrigin.z;
+    });
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const mat = new THREE.PointsMaterial({
+      color: 0xf97316,        // ámbar/naranjo — distinto del rojo de "Identificar Coordenadas"
+      size: 10,
+      sizeAttenuation: false,
+      depthTest: false
+    });
+
+    this.measureMarkerMesh = new THREE.Points(geom, mat);
+    this.measureMarkerMesh.renderOrder = 999;
+    this.scene.add(this.measureMarkerMesh);
+  }
+
+  /**
+   * Dibuja la línea entre los dos puntos de la medición — punteada mientras
+   * se está previsualizando en vivo (segundo punto aún no fijado, sigue al
+   * mouse en cada movimiento — ver onMeasureMouseMove() en app.js), sólida
+   * una vez que ambos puntos quedan fijados. Reemplaza cualquier línea
+   * anterior (llama a clearMeasureLine() primero), así que sólo puede haber
+   * una a la vez.
+   */
+  updateMeasureLine(pointA, pointB, dashed) {
+    this.clearMeasureLine();
+
+    const localA = new THREE.Vector3(pointA.x - this.worldOrigin.x, pointA.y - this.worldOrigin.y, pointA.z - this.worldOrigin.z);
+    const localB = new THREE.Vector3(pointB.x - this.worldOrigin.x, pointB.y - this.worldOrigin.y, pointB.z - this.worldOrigin.z);
+    const geom = new THREE.BufferGeometry().setFromPoints([localA, localB]);
+
+    let mat, line;
+    if (dashed) {
+      mat = new THREE.LineDashedMaterial({ color: 0xf97316, dashSize: 2, gapSize: 1, depthTest: false, transparent: true, opacity: 0.75 });
+      line = new THREE.Line(geom, mat);
+      line.computeLineDistances(); // requerido por LineDashedMaterial para calcular el patrón de segmentos
+    } else {
+      mat = new THREE.LineBasicMaterial({ color: 0xf97316, depthTest: false });
+      line = new THREE.Line(geom, mat);
+    }
+
+    line.renderOrder = 998; // justo debajo de los marcadores (999), por encima de todo lo demás gracias a depthTest:false
+    this.measureLineMesh = line;
+    this.scene.add(line);
+  }
+
+  clearMeasureLine() {
+    if (this.measureLineMesh) {
+      this.scene.remove(this.measureLineMesh);
+      this.measureLineMesh.geometry.dispose();
+      this.measureLineMesh.material.dispose();
+      this.measureLineMesh = null;
+    }
+  }
+
+  /** Limpia por completo lo dibujado de la herramienta "Medir Distancia" (línea + marcadores) — ver clearMeasurement() en app.js. */
+  clearMeasureVisuals() {
+    this.clearMeasureLine();
+    this.updateMeasureMarkers([]);
   }
 
   // ==========================================

@@ -62,6 +62,18 @@ class GeometApp {
     this.coordPickerActive = false;
     this.coordPickerFixedPoints = []; // [{x,y,z}, ...]
 
+    // Medir Distancia (pestaña Vistas): selecciona dos puntos de cualquiera
+    // de las 4 capas soportadas (sondaje/traza, muestra, bloque — solo en
+    // modo Cajas Sólidas — o vértice de topografía DXF) y calcula la
+    // distancia 3D directa entre ellos — ver scene.pickMeasurementPointAtNDC().
+    // measurePointA es el primer punto ya fijado, a la espera del segundo
+    // click; measureResult solo existe una vez fijados ambos ("una medición
+    // a la vez": el próximo click después de completarla arranca una nueva
+    // y descarta la anterior — ver onMeasureClick()).
+    this.measureToolActive = false;
+    this.measurePointA = null; // {point:{x,y,z}, type, label}
+    this.measureResult = null; // {a, b, distance}
+
     // Web Worker
     this.worker = null;
   }
@@ -74,6 +86,7 @@ class GeometApp {
     this.initUIEventListeners();
     this.initDrillPlannerListeners();
     this.initCoordPickerListeners();
+    this.initMeasureToolListeners();
     this.initConsoleControl();
     this.initDraggableLegends();
     this.initThemeToggle();
@@ -972,6 +985,190 @@ class GeometApp {
     }
   }
 
+  // ==========================================
+  // MEDIR DISTANCIA (pestaña Vistas)
+  // ==========================================
+  /**
+   * Conecta el switch de "Medir Distancia" y el botón "Limpiar Medición". El
+   * hover/click reales sobre el visor 3D se escuchan directamente en el
+   * canvas de la escena, igual que "Identificar Coordenadas" — ver
+   * onMeasureMouseMove()/onMeasureClick().
+   */
+  initMeasureToolListeners() {
+    const chkActive = document.getElementById('chk-measure-tool-active');
+    if (chkActive) {
+      chkActive.addEventListener('change', () => this.toggleMeasureTool(chkActive.checked));
+    }
+
+    if (this.scene && this.scene.canvas) {
+      this.scene.canvas.addEventListener('mousemove', (e) => this.onMeasureMouseMove(e));
+      this.scene.canvas.addEventListener('click', (e) => this.onMeasureClick(e));
+    }
+
+    const btnClear = document.getElementById('btn-measure-clear');
+    if (btnClear) {
+      btnClear.addEventListener('click', () => this.clearMeasurement());
+    }
+
+    this.renderMeasureResult();
+  }
+
+  /** Activa/desactiva el modo "Medir Distancia" desde el switch de la pestaña Vistas. */
+  toggleMeasureTool(active) {
+    this.measureToolActive = active;
+    const badge = document.getElementById('measure-tool-badge');
+    const tooltip = document.getElementById('measure-tool-tooltip');
+
+    if (this.measureToolActive) {
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = 'crosshair';
+      if (badge) badge.classList.remove('hidden');
+      this.updateMeasureBadgeText();
+    } else {
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = '';
+      if (badge) badge.classList.add('hidden');
+      if (tooltip) tooltip.classList.add('hidden');
+      // Al desactivar se descarta cualquier medición en curso o completada
+      // — reactivar el modo siempre arranca "en blanco".
+      this.clearMeasurement();
+    }
+  }
+
+  /** Actualiza el texto del badge flotante según si ya hay un primer punto fijado o no. */
+  updateMeasureBadgeText() {
+    const el = document.getElementById('measure-tool-badge-text');
+    if (!el) return;
+    el.innerText = this.measurePointA
+      ? 'Medir Distancia: click en el segundo punto'
+      : 'Medir Distancia: click en el primer punto';
+  }
+
+  /**
+   * Mientras el modo está activo, muestra un tooltip en vivo con el punto
+   * bajo el mouse (tipo de dato + coordenadas) y, si ya hay un primer punto
+   * fijado, también la distancia en vivo hacia ese punto + una línea
+   * punteada de previsualización (ver scene.updateMeasureLine(..., true)).
+   */
+  onMeasureMouseMove(event) {
+    if (!this.measureToolActive) return;
+
+    const tooltip = document.getElementById('measure-tool-tooltip');
+    if (!tooltip) return;
+
+    const canvas = this.scene.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const hit = this.scene.pickMeasurementPointAtNDC(ndcX, ndcY);
+    if (!hit) {
+      tooltip.classList.add('hidden');
+      // No se borra la línea de previsualización acá a propósito: si el
+      // mouse sale momentáneamente de cualquier objeto pickeable, la línea
+      // punteada hacia el último punto válido se mantiene en vez de
+      // parpadear.
+      return;
+    }
+
+    tooltip.classList.remove('hidden');
+    tooltip.style.left = `${event.clientX - rect.left}px`;
+    tooltip.style.top = `${event.clientY - rect.top}px`;
+
+    if (this.measurePointA) {
+      const dist = this.distance3D(this.measurePointA.point, hit.point);
+      tooltip.innerHTML = `
+        <strong>${this.escapeHtml(hit.label)}</strong>
+        <br><span>X:</span> <strong>${hit.point.x.toFixed(2)}</strong>
+        <br><span>Y:</span> <strong>${hit.point.y.toFixed(2)}</strong>
+        <br><span>Z:</span> <strong>${hit.point.z.toFixed(2)}</strong>
+        <br><span style="opacity:0.7;">Click para fijar — Distancia: ${dist.toFixed(2)} m</span>
+      `;
+      this.scene.updateMeasureLine(this.measurePointA.point, hit.point, true);
+    } else {
+      tooltip.innerHTML = `
+        <strong>${this.escapeHtml(hit.label)}</strong>
+        <br><span>X:</span> <strong>${hit.point.x.toFixed(2)}</strong>
+        <br><span>Y:</span> <strong>${hit.point.y.toFixed(2)}</strong>
+        <br><span>Z:</span> <strong>${hit.point.z.toFixed(2)}</strong>
+        <br><span style="opacity:0.7;">Click para fijar el primer punto</span>
+      `;
+    }
+  }
+
+  /** Fija el punto bajo el mouse: el primer clic define el punto A, el segundo define B y calcula la distancia. */
+  onMeasureClick(event) {
+    if (!this.measureToolActive) return;
+
+    const canvas = this.scene.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const hit = this.scene.pickMeasurementPointAtNDC(ndcX, ndcY);
+    if (!hit) {
+      this.showToast('warn', 'No hay ningún dato pickeable bajo el mouse en ese punto.');
+      return;
+    }
+
+    if (!this.measurePointA) {
+      // Si ya había una medición completa, este click arranca una nueva
+      // desde cero — descarta la anterior (línea, marcadores y resultado)
+      // en vez de superponerla con la que se está por armar (ver "una
+      // medición a la vez" en el comentario del constructor).
+      if (this.measureResult) this.clearMeasurement();
+
+      this.measurePointA = hit;
+      this.scene.updateMeasureMarkers([hit.point]);
+      this.updateMeasureBadgeText();
+      this.logConsole('info', `Medir Distancia: primer punto fijado (${hit.label}) en (${hit.point.x.toFixed(2)}, ${hit.point.y.toFixed(2)}, ${hit.point.z.toFixed(2)}).`);
+    } else {
+      const distance = this.distance3D(this.measurePointA.point, hit.point);
+      this.measureResult = { a: this.measurePointA, b: hit, distance };
+      this.scene.updateMeasureMarkers([this.measurePointA.point, hit.point]);
+      this.scene.updateMeasureLine(this.measurePointA.point, hit.point, false);
+      this.renderMeasureResult();
+      this.logConsole('success', `Medir Distancia: ${this.measurePointA.label} → ${hit.label} = ${distance.toFixed(2)} m.`);
+      this.measurePointA = null;
+      this.updateMeasureBadgeText();
+    }
+  }
+
+  /** Distancia 3D directa (línea recta) entre dos puntos {x,y,z} en coordenadas reales. */
+  distance3D(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  /** Redibuja el panel de resultado de la medición en la pestaña Vistas. */
+  renderMeasureResult() {
+    const container = document.getElementById('measure-result');
+    if (!container) return;
+
+    if (!this.measureResult) {
+      container.innerHTML = '<div class="empty-notice">No hay medición activa. Active el modo y haga clic sobre dos puntos.</div>';
+      return;
+    }
+
+    const { a, b, distance } = this.measureResult;
+    container.innerHTML = `
+      <div class="filter-pill" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+        <span class="pill-text"><strong>Punto A</strong> — ${this.escapeHtml(a.label)}<br><span style="opacity:0.7;">${a.point.x.toFixed(2)}, ${a.point.y.toFixed(2)}, ${a.point.z.toFixed(2)}</span></span>
+        <span class="pill-text"><strong>Punto B</strong> — ${this.escapeHtml(b.label)}<br><span style="opacity:0.7;">${b.point.x.toFixed(2)}, ${b.point.y.toFixed(2)}, ${b.point.z.toFixed(2)}</span></span>
+        <span class="pill-text" style="font-size: 0.85rem; color: #f97316;"><strong>Distancia: ${distance.toFixed(2)} m</strong></span>
+      </div>
+    `;
+  }
+
+  /** Descarta la medición en curso o completada: limpia estado, panel y todo lo dibujado en el visor 3D. */
+  clearMeasurement() {
+    this.measurePointA = null;
+    this.measureResult = null;
+    this.scene.clearMeasureVisuals();
+    this.renderMeasureResult();
+    this.updateMeasureBadgeText();
+    const tooltip = document.getElementById('measure-tool-tooltip');
+    if (tooltip) tooltip.classList.add('hidden');
+  }
+
   /**
    * Conecta los controles de coloreado (selector de atributo, paleta y rango manual)
    * de una capa específica ('blocks' o 'drillholes') a su propio estado y refresh,
@@ -1215,7 +1412,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=15');
+    this.worker = new Worker('js/worker-parser.js?v=16');
     
     const t0 = performance.now();
     
