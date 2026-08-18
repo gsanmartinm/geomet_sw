@@ -107,7 +107,13 @@ body.light-mode .console-msg {
    propio .overlay-card, todos sus descendientes (legend-subtitle,
    compass-label, botones de navegación, etc.) las heredan ya oscuras sin
    tener que repetir la regla en cada uno. */
-body.light-mode .overlay-card {
+/* .viewport-nav-controls (slider de zoom + botonera de paneo) se agrega acá
+   aunque NO tiene la clase .overlay-card en sí misma (es solo un
+   contenedor posicionador — ver comentario en su regla más abajo): sus dos
+   hijos con fondo de tarjeta SÍ necesitan quedar oscuros en tema claro,
+   igual que el resto de los widgets flotantes del visor. */
+body.light-mode .overlay-card,
+body.light-mode .viewport-nav-controls {
   --bg-panel: hsla(220, 20%, 15%, 0.7);
   --border-color: hsla(220, 15%, 30%, 0.3);
   --text-main: hsl(220, 15%, 88%);
@@ -788,6 +794,82 @@ body.light-mode #viewport-container {
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Controles de navegación del visor 3D (zoom + paneo + recentrar) — overlay
+   flotante, siempre visible, centrado verticalmente sobre el borde derecho
+   del visor (ver comentario en index.html sobre por qué esa ubicación
+   específica). Es un simple contenedor posicionador: el fondo/borde "de
+   tarjeta" vive en sus dos hijos (.viewport-zoom-slider-wrap y
+   .viewport-pan-pad) por separado, no acá, para que se vean como dos
+   widgets apilados en vez de una única caja grande. */
+.viewport-nav-controls {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.viewport-zoom-slider-wrap {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-blur);
+  border-radius: 6px;
+  padding: 12px 8px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  justify-content: center;
+}
+/* Slider vertical: writing-mode es el mecanismo CSS moderno (Chromium/Edge,
+   que es el motor real de esta app tanto en navegador como en la versión de
+   escritorio Electron) — direction:rtl deja el valor MÁXIMO (más zoom)
+   arriba, siguiendo la convención habitual de un control de zoom tipo mapa.
+   orient="vertical" (atributo HTML) es el equivalente no-estándar que
+   entiende Firefox, como refuerzo adicional. */
+.viewport-zoom-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 6px;
+  height: 110px;
+  accent-color: var(--accent-cyan);
+  cursor: pointer;
+}
+
+.viewport-pan-pad {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-blur);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 2px;
+}
+.viewport-pan-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background-color: transparent;
+  border: 1px solid transparent;
+  color: var(--text-main);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+.viewport-pan-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
 }
 
 /* Leyenda (arrastrable con el mouse desde su encabezado) */

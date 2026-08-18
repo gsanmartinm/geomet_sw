@@ -87,6 +87,7 @@ class GeometApp {
     this.initDrillPlannerListeners();
     this.initCoordPickerListeners();
     this.initMeasureToolListeners();
+    this.initViewportNavControls();
     this.initConsoleControl();
     this.initDraggableLegends();
     this.initThemeToggle();
@@ -155,6 +156,49 @@ class GeometApp {
         document.addEventListener('mouseup', onMouseUp);
       });
     });
+  }
+
+  // ==========================================
+  // CONTROLES DE NAVEGACIÓN DEL VISOR (overlay: zoom + paneo + recentrar)
+  // ==========================================
+  /**
+   * Conecta el slider vertical de zoom y la botonera de paneo direccional +
+   * recentrar (overlay flotante, siempre visible sobre el visor 3D — ver
+   * #viewport-nav-controls en index.html). Toda la lógica de cámara vive en
+   * scene.js (getZoomSliderValue()/setZoomSliderValue()/panScreenSpace()/
+   * recenterView()); acá solo se conectan los eventos DOM. El slider se
+   * mantiene sincronizado en el sentido inverso (cámara -> slider) desde el
+   * propio animate() de scene.js, no desde acá — así responde también a
+   * cambios de zoom que no vinieron del slider (scroll del mouse, Modo
+   * Vista, Vistas Guardadas, etc.).
+   */
+  initViewportNavControls() {
+    const slider = document.getElementById('viewport-zoom-slider');
+    if (slider) {
+      slider.addEventListener('input', (e) => {
+        this.scene.setZoomSliderValue(parseFloat(e.target.value));
+      });
+    }
+
+    // Mapa botón -> dirección de paneo en pantalla (dx, dy) — ver
+    // panScreenSpace() en scene.js.
+    const panButtons = {
+      'btn-nav-up': [0, 1],
+      'btn-nav-down': [0, -1],
+      'btn-nav-left': [-1, 0],
+      'btn-nav-right': [1, 0]
+    };
+    Object.entries(panButtons).forEach(([id, [dx, dy]]) => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        btn.addEventListener('click', () => this.scene.panScreenSpace(dx, dy));
+      }
+    });
+
+    const btnRecenter = document.getElementById('btn-nav-recenter');
+    if (btnRecenter) {
+      btnRecenter.addEventListener('click', () => this.scene.recenterView());
+    }
   }
 
   // ==========================================
@@ -1412,7 +1456,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=16');
+    this.worker = new Worker('js/worker-parser.js?v=17');
     
     const t0 = performance.now();
     

@@ -56,6 +56,13 @@ class GeometScene {
     // Límites de distancia de orbit para evitar perder el modelo
     this.controls.minDistance = 1;
     this.controls.maxDistance = 200000;
+    // Límites de zoom para la cámara ORTOGRÁFICA (Modo Vista) — OrbitControls
+    // ya los respeta nativamente al hacer scroll (clampa camera.zoom entre
+    // estos dos valores cuando camera.isOrthographicCamera), y son los mismos
+    // límites que usa el slider de zoom del overlay de navegación del visor
+    // — ver getZoomSliderValue()/setZoomSliderValue() más abajo.
+    this.controls.minZoom = 0.02;
+    this.controls.maxZoom = 500;
     
     // 2. Luces
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -679,6 +686,19 @@ class GeometScene {
     // Actualizar brújula — proyectar la dirección horizontal de la cámara
     this._updateCompass();
 
+    // Sincronizar el slider vertical del overlay de navegación con el zoom
+    // ACTUAL de la cámara — así responde también a cambios que no vinieron
+    // del slider mismo (scroll del mouse, arrastre de OrbitControls, botones
+    // de paneo/recentrar, cambios de Modo Vista, Vistas Guardadas, etc.), sin
+    // tener que enganchar un listener en cada uno de esos lugares por
+    // separado. El "viaje de ida y vuelta" (slider -> setZoomSliderValue() ->
+    // cámara -> acá de vuelta a getZoomSliderValue() -> slider) es estable:
+    // en el peor caso hay un redondeo de ±1 unidad sobre 1000, imperceptible.
+    const zoomSlider = document.getElementById('viewport-zoom-slider');
+    if (zoomSlider && document.activeElement !== zoomSlider) {
+      zoomSlider.value = this.getZoomSliderValue();
+    }
+
     // Actualizar regla de ejes (grilla verde + valores) si la vista actual
     // es una vista ortogonal exacta (Planta / Perfil N / Perfil E).
     // Envuelto en try/catch: si algo falla aquí, antes se perdía en
@@ -950,6 +970,113 @@ class GeometScene {
     this.controls.enableRotate = true;
     this.controls.update();
     this.viewModeActive = false;
+  }
+
+  // ==========================================
+  // CONTROLES DE NAVEGACIÓN (overlay flotante: zoom + paneo + recentrar)
+  // ==========================================
+  /**
+   * Traduce el zoom ACTUAL de la cámara activa a una posición 0-1000 para el
+   * slider vertical del overlay de navegación — ver setZoomSliderValue()
+   * (inversa) y su sincronización continua en animate(). El zoom en
+   * Three.js es multiplicativo (camera.zoom en la ortográfica, distancia
+   * cámara-target en la perspectiva), así que se usa una escala
+   * LOGARÍTMICA: una escala lineal directa dejaría casi todo el recorrido
+   * útil del slider "amontonado" en un extremo.
+   *   - Ortográfica (Modo Vista): sobre camera.zoom, entre
+   *     controls.minZoom/maxZoom (ver constructor).
+   *   - Perspectiva (vista libre): sobre la distancia cámara-target, entre
+   *     controls.minDistance/maxDistance — INVERTIDA, porque más zoom
+   *     significa MENOR distancia.
+   */
+  getZoomSliderValue() {
+    const cam = this.camera;
+    let t;
+    if (cam.isOrthographicCamera) {
+      const minZ = this.controls.minZoom;
+      const maxZ = this.controls.maxZoom;
+      t = Math.log(cam.zoom / minZ) / Math.log(maxZ / minZ);
+    } else {
+      const dist = Math.max(cam.position.distanceTo(this.controls.target), 1e-6);
+      const minD = this.controls.minDistance;
+      const maxD = this.controls.maxDistance;
+      t = Math.log(maxD / dist) / Math.log(maxD / minD);
+    }
+    return Math.round(Math.min(1, Math.max(0, t)) * 1000);
+  }
+
+  /**
+   * Inversa de getZoomSliderValue(): aplica una posición 0-1000 del slider
+   * al zoom de la cámara activa (ver #viewport-zoom-slider en app.js).
+   */
+  setZoomSliderValue(sliderVal) {
+    const t = Math.min(1, Math.max(0, sliderVal / 1000));
+    const cam = this.camera;
+
+    if (cam.isOrthographicCamera) {
+      const minZ = this.controls.minZoom;
+      const maxZ = this.controls.maxZoom;
+      cam.zoom = minZ * Math.pow(maxZ / minZ, t);
+      cam.updateProjectionMatrix();
+    } else {
+      const minD = this.controls.minDistance;
+      const maxD = this.controls.maxDistance;
+      const dist = maxD * Math.pow(minD / maxD, t); // t=0 -> maxD (lejos), t=1 -> minD (cerca)
+      const dir = new THREE.Vector3().subVectors(cam.position, this.controls.target);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1); // caso degenerado: cámara exactamente sobre el target
+      dir.normalize().multiplyScalar(dist);
+      cam.position.copy(this.controls.target).add(dir);
+    }
+    this.controls.update();
+  }
+
+  /**
+   * Desplaza la cámara y su target un paso fijo EN EL PLANO DE LA PANTALLA
+   * — usado por la botonera de paneo del overlay de navegación (ver
+   * onNavPanClick() en app.js). `dx`/`dy` en {-1, 0, 1}: dirección del
+   * botón presionado (dy=1 sube, dx=1 va a la derecha). El tamaño del paso
+   * se recalcula según el zoom ACTUAL (más acercado = pasos más chicos en
+   * unidades del mundo), para que el desplazamiento se sienta parecido en
+   * pantalla sin importar qué tan acercada esté la vista. Funciona igual
+   * para la cámara ortográfica (Modo Vista) y la perspectiva (vista libre).
+   */
+  panScreenSpace(dx, dy) {
+    const cam = this.camera;
+    const right = new THREE.Vector3();
+    const upVec = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    cam.matrixWorld.extractBasis(right, upVec, forward);
+
+    let step;
+    if (cam.isOrthographicCamera) {
+      step = (cam.right - cam.left) / (2 * cam.zoom) * 0.15;
+    } else {
+      step = Math.max(cam.position.distanceTo(this.controls.target), 1) * 0.15;
+    }
+
+    const offset = new THREE.Vector3()
+      .addScaledVector(right, dx * step)
+      .addScaledVector(upVec, dy * step);
+
+    cam.position.add(offset);
+    this.controls.target.add(offset);
+    this.controls.update();
+  }
+
+  /**
+   * Recentra/reencuadra la vista según el contexto activo — botón central
+   * de la botonera de paneo (ver onNavPanClick() en app.js): en Modo Vista
+   * vuelve a encuadrar la orientación actual (mismo criterio que al
+   * activarlo, ver enterViewMode()); en vista libre, vuelve a la
+   * perspectiva isométrica que abarca todos los datos cargados (ver
+   * focusOnBounds()).
+   */
+  recenterView() {
+    if (this.viewModeActive && this.viewModeOrientation) {
+      this.enterViewMode(this.viewModeOrientation);
+    } else if (this._dataBounds) {
+      this.focusOnBounds(this._dataBounds);
+    }
   }
 
   /**
