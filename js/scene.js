@@ -165,6 +165,7 @@ class GeometScene {
     this.drillholeMesh = null;   // InstancedMesh de cilindros
     this.sampleMesh = null;      // THREE.Points de muestras metalúrgicas
     this.dxfMeshes = {};         // layerName -> THREE.Mesh / Line
+    this.coordPickerMarkerMesh = null; // THREE.Points: marcadores rojos de "Identificar Coordenadas" (ver updateCoordPickerMarkers())
 
     this.drillholesGroup = new THREE.Group();
     this.dxfGroup = new THREE.Group();
@@ -1957,6 +1958,49 @@ class GeometScene {
     // app.js es devolver coordenadas REALES (ver comentario extenso de
     // worldOrigin en el constructor).
     return { x: nearest.x + this.worldOrigin.x, y: nearest.y + this.worldOrigin.y, z: nearest.z + this.worldOrigin.z };
+  }
+
+  /**
+   * Dibuja un pequeño punto rojo en el visor 3D por cada coordenada fijada
+   * con la herramienta "Identificar Coordenadas" (pestaña Vistas) — feedback
+   * visual de qué vértices ya se marcaron, ya que la lista vive en el
+   * sidebar y puede no estar a la vista mientras se sigue navegando la
+   * escena. Se reconstruye completo cada vez que cambia la lista (agregar,
+   * eliminar uno, o vaciar todos) — ver renderCoordPickerList() en app.js.
+   * `points` viene en coordenadas REALES (mismo contrato que
+   * pickNearestVertexAtNDC()); acá se resta worldOrigin, igual que el resto
+   * de las geometrías del visor (ver comentario extenso de worldOrigin en el
+   * constructor).
+   */
+  updateCoordPickerMarkers(points) {
+    if (this.coordPickerMarkerMesh) {
+      this.scene.remove(this.coordPickerMarkerMesh);
+      this.coordPickerMarkerMesh.geometry.dispose();
+      this.coordPickerMarkerMesh.material.dispose();
+      this.coordPickerMarkerMesh = null;
+    }
+    if (!points || points.length === 0) return;
+
+    const positions = new Float32Array(points.length * 3);
+    points.forEach((p, i) => {
+      positions[i * 3] = p.x - this.worldOrigin.x;
+      positions[i * 3 + 1] = p.y - this.worldOrigin.y;
+      positions[i * 3 + 2] = p.z - this.worldOrigin.z;
+    });
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const mat = new THREE.PointsMaterial({
+      color: 0xff0000,
+      size: 10,
+      sizeAttenuation: false, // tamaño fijo en pantalla (igual criterio que las Muestras — ver samplePointSize)
+      depthTest: false        // siempre visible por encima de la superficie DXF, para que no quede "tapado" por la malla al alejar la cámara
+    });
+
+    this.coordPickerMarkerMesh = new THREE.Points(geom, mat);
+    this.coordPickerMarkerMesh.renderOrder = 999; // dibujar al final, junto con depthTest:false
+    this.scene.add(this.coordPickerMarkerMesh);
   }
 
   // ==========================================

@@ -808,6 +808,7 @@ class GeometApp {
         if (this.coordPickerFixedPoints.length === 0) return;
         if (!confirm('¿Eliminar todos los puntos fijados de esta sesión?')) return;
         this.coordPickerFixedPoints = [];
+        this.scene.updateCoordPickerMarkers(this.coordPickerFixedPoints);
         this.renderCoordPickerList();
         this.logConsole('info', 'Identificar Coordenadas: se eliminaron todos los puntos fijados.');
       });
@@ -884,6 +885,7 @@ class GeometApp {
     }
 
     this.coordPickerFixedPoints.push(vertex);
+    this.scene.updateCoordPickerMarkers(this.coordPickerFixedPoints);
     this.renderCoordPickerList();
     this.logConsole('success', `Identificar Coordenadas: punto fijado en (${vertex.x.toFixed(2)}, ${vertex.y.toFixed(2)}, ${vertex.z.toFixed(2)}).`);
   }
@@ -923,6 +925,7 @@ class GeometApp {
       btnDelete.innerText = '×';
       btnDelete.addEventListener('click', () => {
         this.coordPickerFixedPoints.splice(idx, 1);
+        this.scene.updateCoordPickerMarkers(this.coordPickerFixedPoints);
         this.renderCoordPickerList();
       });
 
@@ -1212,7 +1215,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=14');
+    this.worker = new Worker('js/worker-parser.js?v=15');
     
     const t0 = performance.now();
     
