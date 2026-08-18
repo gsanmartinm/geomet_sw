@@ -625,6 +625,24 @@ body.light-mode #viewport-container {
   50% { box-shadow: 0 0 18px hsla(255, 92%, 76%, 0.55); }
 }
 
+/* Badge de modo activo de "Identificar Coordenadas" — mismo patrón que
+   .planner-picking-badge (ver arriba), pero en cian para distinguirlo a
+   simple vista del modo de Planificación (violeta), por si en algún momento
+   quedaran ambos badges definidos en el DOM a la vez. */
+.coord-picker-badge {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  animation: coord-picker-badge-pulse 1.6s ease-in-out infinite;
+}
+.coord-picker-dot {
+  background-color: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+@keyframes coord-picker-badge-pulse {
+  0%, 100% { box-shadow: 0 0 8px hsla(180, 100%, 50%, 0.25); }
+  50% { box-shadow: 0 0 18px hsla(180, 100%, 50%, 0.55); }
+}
+
 .fps-counter {
   font-family: var(--font-display);
 }

@@ -53,6 +53,15 @@ class GeometApp {
     this.drillPlannerPicking = false;
     this.drillPlannerPendingCollar = null; // {x,y,z} recién pickeado, a la espera de "Confirmar Sondaje"
 
+    // Identificar Coordenadas (pestaña Vistas): modo de "snap a vértice"
+    // sobre las superficies DXF cargadas — hover muestra un tooltip en vivo
+    // con el vértice más cercano bajo el mouse (ver scene.pickNearestVertexAtNDC()),
+    // click lo fija a coordPickerFixedPoints (lista de sesión, con botón
+    // copiar por punto — no se dibujan marcadores en el visor 3D ni se
+    // exporta a CSV, por decisión explícita del alcance de esta feature).
+    this.coordPickerActive = false;
+    this.coordPickerFixedPoints = []; // [{x,y,z}, ...]
+
     // Web Worker
     this.worker = null;
   }
@@ -64,6 +73,7 @@ class GeometApp {
 
     this.initUIEventListeners();
     this.initDrillPlannerListeners();
+    this.initCoordPickerListeners();
     this.initConsoleControl();
     this.initDraggableLegends();
     this.initThemeToggle();
@@ -771,6 +781,194 @@ class GeometApp {
     }
   }
 
+  // ==========================================
+  // IDENTIFICAR COORDENADAS (pestaña Vistas — snap a vértice DXF)
+  // ==========================================
+  /**
+   * Conecta el switch de "Identificar Coordenadas" y el botón "Eliminar
+   * Todos" de la lista de puntos fijados. El hover/click reales sobre el
+   * visor 3D se escuchan directamente en el canvas de la escena, igual que
+   * el Planificador de Sondajes — ver onCoordPickerMouseMove()/
+   * onCoordPickerClick().
+   */
+  initCoordPickerListeners() {
+    const chkActive = document.getElementById('chk-coord-picker-active');
+    if (chkActive) {
+      chkActive.addEventListener('change', () => this.toggleCoordPicker(chkActive.checked));
+    }
+
+    if (this.scene && this.scene.canvas) {
+      this.scene.canvas.addEventListener('mousemove', (e) => this.onCoordPickerMouseMove(e));
+      this.scene.canvas.addEventListener('click', (e) => this.onCoordPickerClick(e));
+    }
+
+    const btnClearAll = document.getElementById('btn-coord-picker-clear-all');
+    if (btnClearAll) {
+      btnClearAll.addEventListener('click', () => {
+        if (this.coordPickerFixedPoints.length === 0) return;
+        if (!confirm('¿Eliminar todos los puntos fijados de esta sesión?')) return;
+        this.coordPickerFixedPoints = [];
+        this.renderCoordPickerList();
+        this.logConsole('info', 'Identificar Coordenadas: se eliminaron todos los puntos fijados.');
+      });
+    }
+
+    this.renderCoordPickerList();
+  }
+
+  /** Activa/desactiva el modo de "Identificar Coordenadas" desde el switch de la pestaña Vistas. */
+  toggleCoordPicker(active) {
+    this.coordPickerActive = active;
+    const badge = document.getElementById('coord-picker-badge');
+    const tooltip = document.getElementById('coord-picker-tooltip');
+
+    if (this.coordPickerActive) {
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = 'crosshair';
+      if (badge) badge.classList.remove('hidden');
+    } else {
+      if (this.scene && this.scene.canvas) this.scene.canvas.style.cursor = '';
+      if (badge) badge.classList.add('hidden');
+      if (tooltip) tooltip.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Mientras el modo está activo, muestra un tooltip en vivo con el vértice
+   * de la triangulación DXF más cercano al mouse (scene.pickNearestVertexAtNDC()).
+   * Si el rayo no impacta ninguna superficie DXF, oculta el tooltip.
+   */
+  onCoordPickerMouseMove(event) {
+    if (!this.coordPickerActive) return;
+
+    const tooltip = document.getElementById('coord-picker-tooltip');
+    if (!tooltip) return;
+
+    const canvas = this.scene.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const vertex = this.scene.pickNearestVertexAtNDC(ndcX, ndcY);
+    if (!vertex) {
+      tooltip.classList.add('hidden');
+      return;
+    }
+
+    // Mismo criterio de posicionamiento que #three-tooltip en scene.js
+    // (position:absolute respecto a #viewport-container, no a la ventana).
+    tooltip.classList.remove('hidden');
+    tooltip.style.left = `${event.clientX - rect.left}px`;
+    tooltip.style.top = `${event.clientY - rect.top}px`;
+    tooltip.innerHTML = `
+      <strong>Vértice DXF</strong>
+      <br><span>X:</span> <strong>${vertex.x.toFixed(2)}</strong>
+      <br><span>Y:</span> <strong>${vertex.y.toFixed(2)}</strong>
+      <br><span>Z:</span> <strong>${vertex.z.toFixed(2)}</strong>
+      <br><span style="opacity:0.7;">Click para fijar</span>
+    `;
+  }
+
+  /** Fija el vértice actualmente snapeado (bajo el mouse) a la lista de puntos de sesión. */
+  onCoordPickerClick(event) {
+    if (!this.coordPickerActive) return;
+
+    const canvas = this.scene.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const vertex = this.scene.pickNearestVertexAtNDC(ndcX, ndcY);
+    if (!vertex) {
+      this.showToast('warn', 'No hay una superficie DXF bajo el mouse en ese punto.');
+      return;
+    }
+
+    this.coordPickerFixedPoints.push(vertex);
+    this.renderCoordPickerList();
+    this.logConsole('success', `Identificar Coordenadas: punto fijado en (${vertex.x.toFixed(2)}, ${vertex.y.toFixed(2)}, ${vertex.z.toFixed(2)}).`);
+  }
+
+  /** Redibuja la lista de puntos fijados (pestaña Vistas), cada uno con su botón de copiar y de eliminar. */
+  renderCoordPickerList() {
+    const container = document.getElementById('coord-picker-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (this.coordPickerFixedPoints.length === 0) {
+      container.innerHTML = '<div class="empty-notice">No hay puntos fijados. Active el modo y haga clic sobre una superficie DXF.</div>';
+      return;
+    }
+
+    this.coordPickerFixedPoints.forEach((point, idx) => {
+      const coordText = `${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)}`;
+
+      const pill = document.createElement('div');
+      pill.className = 'filter-pill';
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'pill-text';
+      textSpan.innerHTML = `<strong>Punto ${idx + 1}</strong> — X: ${point.x.toFixed(2)} / Y: ${point.y.toFixed(2)} / Z: ${point.z.toFixed(2)}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'pill-actions';
+
+      const btnCopy = document.createElement('button');
+      btnCopy.className = 'btn btn-xs btn-outline';
+      btnCopy.innerText = 'Copiar';
+      btnCopy.addEventListener('click', () => this.copyCoordPickerPoint(coordText, btnCopy));
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn-icon';
+      btnDelete.style.color = 'var(--accent-red)';
+      btnDelete.innerText = '×';
+      btnDelete.addEventListener('click', () => {
+        this.coordPickerFixedPoints.splice(idx, 1);
+        this.renderCoordPickerList();
+      });
+
+      actions.appendChild(btnCopy);
+      actions.appendChild(btnDelete);
+
+      pill.appendChild(textSpan);
+      pill.appendChild(actions);
+      container.appendChild(pill);
+    });
+  }
+
+  /** Copia "X, Y, Z" de un punto fijado al portapapeles, con feedback visual momentáneo en el botón. */
+  copyCoordPickerPoint(coordText, btnEl) {
+    const onCopied = () => {
+      this.showToast('success', 'Coordenadas copiadas al portapapeles.');
+      if (btnEl) {
+        const original = btnEl.innerText;
+        btnEl.innerText = 'Copiado ✓';
+        setTimeout(() => { btnEl.innerText = original; }, 1500);
+      }
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(coordText).then(onCopied).catch(() => {
+        this.showToast('error', 'No se pudo copiar al portapapeles.');
+      });
+    } else {
+      // Fallback para contextos sin Clipboard API (ej. sin HTTPS/localhost).
+      const textarea = document.createElement('textarea');
+      textarea.value = coordText;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        onCopied();
+      } catch (err) {
+        this.showToast('error', 'No se pudo copiar al portapapeles.');
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+  }
+
   /**
    * Conecta los controles de coloreado (selector de atributo, paleta y rango manual)
    * de una capa específica ('blocks' o 'drillholes') a su propio estado y refresh,
@@ -1014,7 +1212,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=13');
+    this.worker = new Worker('js/worker-parser.js?v=14');
     
     const t0 = performance.now();
     

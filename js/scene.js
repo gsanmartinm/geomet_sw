@@ -1896,6 +1896,69 @@ class GeometScene {
     return { x: target.x + this.worldOrigin.x, y: target.y + this.worldOrigin.y, z: referenceZ };
   }
 
+  /**
+   * "Snap a vértice": identifica el vértice REAL de la triangulación DXF más
+   * cercano al punto de impacto del rayo de cámara — ver
+   * toggleCoordPicker()/onCoordPickerMouseMove() en app.js. A diferencia de
+   * pickCollarAtNDC() (que devuelve el punto interpolado sobre la cara, útil
+   * para apoyar un collar en cualquier lugar de la superficie), acá interesa
+   * el vértice tal como viene en el archivo DXF de origen (ej. un punto de
+   * levantamiento topográfico real), no un punto interpolado entre tres de
+   * ellos.
+   *
+   * `ndcX`/`ndcY` en coordenadas normalizadas de dispositivo (-1 a 1).
+   * Devuelve `{x, y, z}` en coordenadas REALES, o `null` si no hay malla DXF
+   * cargada o el rayo no impacta ninguna.
+   */
+  pickNearestVertexAtNDC(ndcX, ndcY) {
+    const mouse = new THREE.Vector2(ndcX, ndcY);
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    const targets = [];
+    Object.values(this.dxfMeshes).forEach(group => {
+      group.traverse(obj => {
+        if (obj.isMesh) targets.push(obj);
+      });
+    });
+    if (targets.length === 0) return null;
+
+    const intersects = this.raycaster.intersectObjects(targets, false);
+    if (intersects.length === 0) return null;
+
+    const hit = intersects[0];
+    const face = hit.face;
+    const posAttr = hit.object.geometry ? hit.object.geometry.attributes.position : null;
+
+    if (!face || !posAttr) {
+      // Sin datos de cara (no debería pasar sobre una malla triangulada):
+      // cae de vuelta al punto interpolado, igual que pickCollarAtNDC().
+      const p = hit.point;
+      return { x: p.x + this.worldOrigin.x, y: p.y + this.worldOrigin.y, z: p.z + this.worldOrigin.z };
+    }
+
+    // Los 3 vértices candidatos de la cara intersectada, llevados a espacio
+    // MUNDO (localToWorld) por si la malla tuviera transformación propia —
+    // hoy las mallas DXF no se trasladan/rotan individualmente, pero esto
+    // las deja en el mismo espacio que hit.point sin asumirlo.
+    const candidates = [face.a, face.b, face.c].map(idx => {
+      const v = new THREE.Vector3(posAttr.getX(idx), posAttr.getY(idx), posAttr.getZ(idx));
+      hit.object.localToWorld(v);
+      return v;
+    });
+
+    let nearest = candidates[0];
+    let nearestDist = hit.point.distanceToSquared(candidates[0]);
+    for (let i = 1; i < candidates.length; i++) {
+      const d = hit.point.distanceToSquared(candidates[i]);
+      if (d < nearestDist) { nearestDist = d; nearest = candidates[i]; }
+    }
+
+    // Se suma worldOrigin de vuelta porque el contrato de este método hacia
+    // app.js es devolver coordenadas REALES (ver comentario extenso de
+    // worldOrigin en el constructor).
+    return { x: nearest.x + this.worldOrigin.x, y: nearest.y + this.worldOrigin.y, z: nearest.z + this.worldOrigin.z };
+  }
+
   // ==========================================
   // RENDER DE MUESTRAS METALÚRGICAS
   // ==========================================

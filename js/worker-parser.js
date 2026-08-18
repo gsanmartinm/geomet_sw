@@ -3,12 +3,12 @@
 
 // DxfParser vive en su propio archivo (compartido con el resto de la app);
 // lo importamos aquí para poder parsear DXF dentro del worker (ver parseDxf()).
-// ?v=13: mismo mecanismo de cache-busting que el resto de los scripts (ver
+// ?v=14: mismo mecanismo de cache-busting que el resto de los scripts (ver
 // comentario en index.html) — sin esto, el navegador podía seguir sirviendo
 // una copia vieja de dxf-parser.js indefinidamente, ya que importScripts()
 // no se beneficiaba del "?v=N" que sí fuerza la recarga de worker-parser.js
 // mismo (ver this.worker = new Worker(...) en app.js).
-importScripts('dxf-parser.js?v=13');
+importScripts('dxf-parser.js?v=14');
 
 self.onmessage = function(e) {
   const { action, payload } = e.data;
