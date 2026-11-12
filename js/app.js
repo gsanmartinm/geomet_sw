@@ -1456,7 +1456,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=17');
+    this.worker = new Worker('js/worker-parser.js?v=18');
     
     const t0 = performance.now();
     
@@ -1618,6 +1618,8 @@ class GeometApp {
     b = this._extendBounds(b, this.scene.getDxfBounds());
     this.scene.setDataBounds(b);
     this.scene.focusOnBounds(b);
+    // Rango de corte sobre los bounds unificados (incluye DXF si ya había).
+    this.updateSectionPosLimits();
     this.triggerBlockRefresh();
     this.updateLayersTree();
   }
@@ -1872,6 +1874,8 @@ class GeometApp {
         b = this._extendBounds(b, this.samplesData.bounds);
       }
       this.scene.setDataBounds(b);
+      // El rango del slider/input de corte debe cubrir también el DXF.
+      this.updateSectionPosLimits();
     }
 
     this.updateLayersTree();
@@ -2168,8 +2172,13 @@ class GeometApp {
     const label = document.getElementById('label-section-pos');
 
     let min = -1000, max = 1000;
-    if (this.blockData && this.blockData.bounds) {
-      const b = this.blockData.bounds;
+    // Usa los bounds unificados de la escena (Bloques + Sondajes + Muestras +
+    // DXF); así, si solo hay DXF cargado (sin modelo de bloques), el rango
+    // sigue los datos reales en vez de quedar fijo en -1000..1000.
+    const unified = this.scene ? this.scene.getDataBounds() : null;
+    const sectionBounds = unified || (this.blockData && this.blockData.bounds) || null;
+    if (sectionBounds) {
+      const b = sectionBounds;
       if (type === 'vertical-n') { // Eje X
         min = Math.floor(b.minX); max = Math.ceil(b.maxX);
       } else if (type === 'vertical-e') { // Eje Y
