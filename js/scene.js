@@ -233,6 +233,7 @@ class GeometScene {
     // addDxfLayer() (que inicializa la entrada la primera vez que aparece un
     // nombre de capa) y updateDxfLayerStyle() (que la edita en vivo).
     this.dxfLayerStyles = {};
+    this.dxfShowEdges = true;    // aristas (wireframe) de las superficies DXF
     this.defaultDxfColor = 0x475569;   // Gris azulado mineral, color inicial de cualquier capa nueva
     this.defaultDxfOpacity = 0.7;
     this._dxfClipPlanes = [];    // clipping planes activos (ver updateDxfSectionClip)
@@ -2401,6 +2402,7 @@ class GeometScene {
         opacity: 0.3
       });
       const wireframe = new THREE.LineSegments(wireframeGeom, wireframeMat);
+      wireframe.visible = this.dxfShowEdges; // ver setDxfEdgesVisible()
       layerGroup.add(wireframe);
     }
     
@@ -2468,6 +2470,20 @@ class GeometScene {
    * polilíneas/contornos DXF (LINE/LWPOLYLINE, en cian) mantienen su propio
    * color fijo — el control de color solo afecta el relleno de la superficie.
    */
+  /**
+   * Muestra/oculta las aristas (wireframe de los triángulos) de TODAS las
+   * superficies DXF, actuales y futuras. Las polilíneas/contornos reales
+   * (isLine && !isLineSegments) no se tocan.
+   */
+  setDxfEdgesVisible(visible) {
+    this.dxfShowEdges = visible;
+    Object.values(this.dxfMeshes).forEach(group => {
+      group.children.forEach(child => {
+        if (child.isLineSegments) child.visible = visible;
+      });
+    });
+  }
+
   updateDxfLayerStyle(layerName, changes) {
     if (!this.dxfLayerStyles[layerName]) return;
     Object.assign(this.dxfLayerStyles[layerName], changes);

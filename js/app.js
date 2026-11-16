@@ -288,6 +288,11 @@ class GeometApp {
       });
     }
 
+    const chkDxfEdges = document.getElementById('chk-dxf-edges');
+    if (chkDxfEdges) {
+      chkDxfEdges.addEventListener('change', (e) => this.scene.setDxfEdgesVisible(e.target.checked));
+    }
+
     const inputDxfColor = document.getElementById('input-dxf-color');
     if (inputDxfColor) {
       inputDxfColor.addEventListener('input', (e) => {
@@ -1456,7 +1461,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=18');
+    this.worker = new Worker('js/worker-parser.js?v=19');
     
     const t0 = performance.now();
     
