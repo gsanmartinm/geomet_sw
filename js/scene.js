@@ -2471,6 +2471,72 @@ class GeometScene {
    * color fijo — el control de color solo afecta el relleno de la superficie.
    */
   /**
+   * "Pega" una imagen georreferenciada sobre la superficie de una capa DXF
+   * (proyección en planta: cada vértice toma su color de la imagen según su
+   * Este/Norte). `bitmap` es un ImageBitmap/Image/Canvas ya cargado, y
+   * `geo` es una transformación afín de mundo -> píxel estilo world file:
+   * {A, B, C, D, E, F} con x = A*px + B*py + C, y = D*px + E*py + F, donde
+   * C/F es la posición de la ESQUINA superior izquierda de la imagen
+   * (px,py en píxeles, py hacia abajo). `width`/`height` son los píxeles
+   * originales de la imagen (para normalizar UV).
+   * Devuelve true si se aplicó.
+   */
+  applyDxfLayerImage(layerName, bitmap, width, height, geo) {
+    const group = this.dxfMeshes[layerName];
+    if (!group) return false;
+
+    const det = geo.A * geo.E - geo.B * geo.D;
+    if (!isFinite(det) || Math.abs(det) < 1e-18) return false;
+
+    let applied = false;
+    group.children.forEach(child => {
+      if (!child.isMesh) return;
+      const pos = child.geometry.attributes.position;
+      const uv = new Float32Array(pos.count * 2);
+      for (let i = 0; i < pos.count; i++) {
+        // Coordenadas reales (se suma worldOrigin a la posición local).
+        const dx = pos.getX(i) + this.worldOrigin.x - geo.C;
+        const dy = pos.getY(i) + this.worldOrigin.y - geo.F;
+        const px = (geo.E * dx - geo.B * dy) / det;
+        const py = (-geo.D * dx + geo.A * dy) / det;
+        uv[i * 2] = px / width;
+        uv[i * 2 + 1] = 1 - py / height; // flipY de la textura
+      }
+      child.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+
+      if (child.material.map) child.material.map.dispose();
+      const tex = new THREE.CanvasTexture(bitmap);
+      tex.anisotropy = 4;
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+      child.material.map = tex;
+      child.material.color.set(0xffffff);
+      child.material.needsUpdate = true;
+      applied = true;
+    });
+    return applied;
+  }
+
+  /** Quita la imagen de una capa DXF y restaura el color de superficie. */
+  removeDxfLayerImage(layerName) {
+    const group = this.dxfMeshes[layerName];
+    if (!group) return;
+    const style = this.dxfLayerStyles[layerName];
+    group.children.forEach(child => {
+      if (child.isMesh && child.material && child.material.map) {
+        child.material.map.dispose();
+        child.material.map = null;
+        if (style) child.material.color.set(style.color);
+        child.material.needsUpdate = true;
+      }
+    });
+  }
+
+  hasDxfLayerImage(layerName) {
+    const group = this.dxfMeshes[layerName];
+    return !!(group && group.children.some(c => c.isMesh && c.material && c.material.map));
+  }
+
+  /**
    * Muestra/oculta las aristas (wireframe de los triángulos) de TODAS las
    * superficies DXF, actuales y futuras. Las polilíneas/contornos reales
    * (isLine && !isLineSegments) no se tocan.
@@ -2495,7 +2561,8 @@ class GeometScene {
     const colorObj = new THREE.Color(style.color);
     layerGroup.children.forEach(child => {
       if (child.isMesh && child.material) {
-        child.material.color.copy(colorObj);
+        // Con imagen aplicada el color debe quedar blanco (si no, tiñe la textura).
+        if (!child.material.map) child.material.color.copy(colorObj);
         child.material.opacity = style.opacity;
         child.material.transparent = style.opacity < 1;
         child.material.needsUpdate = true;

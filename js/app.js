@@ -158,6 +158,67 @@ class GeometApp {
     });
   }
 
+  /**
+   * Pega la imagen elegida sobre la capa DXF seleccionada (Visualización >
+   * Superficies DXF). Georreferencia: world file si se cargó, si no las 4
+   * coordenadas manuales. Si la imagen supera el máximo de textura de la
+   * GPU, se reduce (la georreferencia no cambia, usa los píxeles originales).
+   */
+  async applyDxfImage() {
+    const layerName = document.getElementById('select-dxf-layer').value;
+    const imgFile = document.getElementById('dxf-image-file').files[0];
+    const wfFile = document.getElementById('dxf-image-worldfile').files[0];
+    if (!layerName) { alert('Seleccione primero una capa DXF.'); return; }
+    if (!imgFile) { alert('Seleccione un archivo de imagen (JPG o PNG).'); return; }
+
+    try {
+      const bmp = await createImageBitmap(imgFile);
+      const W = bmp.width, H = bmp.height;
+
+      let geo;
+      if (wfFile) {
+        const nums = (await wfFile.text()).split(/\r?\n/).map(s => parseFloat(s)).filter(n => !isNaN(n));
+        if (nums.length < 6) throw new Error('El world file debe tener 6 valores numéricos.');
+        const [A, D, B, E, C, F] = nums;
+        // El world file referencia el CENTRO del píxel superior izquierdo; se pasa a la esquina.
+        geo = { A, B, D, E, C: C - A / 2 - B / 2, F: F - D / 2 - E / 2 };
+      } else {
+        const v = id => parseFloat(document.getElementById(id).value);
+        const minX = v('dxf-image-min-x'), maxX = v('dxf-image-max-x');
+        const minY = v('dxf-image-min-y'), maxY = v('dxf-image-max-y');
+        if ([minX, maxX, minY, maxY].some(isNaN) || minX >= maxX || minY >= maxY) {
+          alert('Ingrese las 4 coordenadas (mínimo menor que máximo) o cargue un world file.');
+          return;
+        }
+        geo = { A: (maxX - minX) / W, B: 0, D: 0, E: -(maxY - minY) / H, C: minX, F: maxY };
+      }
+
+      // Reducir si excede el límite de textura de la GPU (o 8192 px por prudencia).
+      const gl = this.scene.renderer.capabilities;
+      const maxTex = Math.min(gl.maxTextureSize || 4096, 8192);
+      let source = bmp;
+      if (Math.max(W, H) > maxTex) {
+        const k = maxTex / Math.max(W, H);
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(W * k));
+        cv.height = Math.max(1, Math.round(H * k));
+        cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+        source = cv;
+        this.logConsole('warn', `La imagen (${W}x${H}) excede el máximo de textura; se redujo a ${cv.width}x${cv.height}.`);
+      }
+
+      if (this.scene.applyDxfLayerImage(layerName, source, W, H, geo)) {
+        this.logConsole('success', `Imagen aplicada a la capa DXF "${layerName}".`);
+        this.showToast('success', 'Imagen aplicada a la superficie.');
+      } else {
+        alert('No se pudo aplicar: la capa no tiene superficie triangulada o la georreferencia es inválida.');
+      }
+    } catch (err) {
+      this.logConsole('error', `Error al aplicar la imagen: ${err.message}`);
+      alert(`Error al aplicar la imagen: ${err.message}`);
+    }
+  }
+
   // ==========================================
   // CONTROLES DE NAVEGACIÓN DEL VISOR (overlay: zoom + paneo + recentrar)
   // ==========================================
@@ -285,6 +346,18 @@ class GeometApp {
     if (selectDxfLayer) {
       selectDxfLayer.addEventListener('change', (e) => {
         this.syncDxfStyleControls(e.target.value || null);
+      });
+    }
+
+    const btnImgApply = document.getElementById('btn-dxf-image-apply');
+    if (btnImgApply) btnImgApply.addEventListener('click', () => this.applyDxfImage());
+    const btnImgRemove = document.getElementById('btn-dxf-image-remove');
+    if (btnImgRemove) {
+      btnImgRemove.addEventListener('click', () => {
+        const layerName = selectDxfLayer ? selectDxfLayer.value : null;
+        if (!layerName) return;
+        this.scene.removeDxfLayerImage(layerName);
+        this.logConsole('info', `Imagen quitada de la capa DXF "${layerName}".`);
       });
     }
 
@@ -1461,7 +1534,7 @@ class GeometApp {
     // del Worker (ej. sin soporte .asc o filtro previo) aunque el resto de
     // la app ya se hubiera actualizado, porque los Workers también cachean
     // su script por URL exacta.
-    this.worker = new Worker('js/worker-parser.js?v=19');
+    this.worker = new Worker('js/worker-parser.js?v=20');
     
     const t0 = performance.now();
     
